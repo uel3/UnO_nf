@@ -50,7 +50,7 @@ workflow {
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
-    //SAMTOOLS_SORT( mapped_reads_ch.aligned_sam )
+    max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, trimmed_reads_ch.trimmed_reads )
     // Enter the rest of the processes for variant calling based on the bash script below
 
 }
@@ -224,7 +224,7 @@ process BOWTIE2_INDEX {
 /* 
 * Mapping reads to bowtie2 index to evaluate coverage and for downstreaming binning tools.
 */
-process BOWTIE2_MAP_READS{
+process BOWTIE2_MAP_READS {
     tag "BOWTIE2_MAP_READS ${index} ${reads_trimmed}" //"$assembler-$name"
     publishDir ("${params.outdir}/bowtie2_out/mapped", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
         //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
@@ -237,10 +237,8 @@ process BOWTIE2_MAP_READS{
     
     
     output:
-    //path( "${sample_id}.sam" ), emit: aligned_sam
     path( "${sample_id}_sorted.bam*" ), emit: aligned_bam 
     //path( "${sample_id}.bowtie2.log" ), emit: align_log
-    //path( "${sample_id}.bam.bai" ), emit: index_bam
 
     script:
     def idx = index[0].getBaseName(2)
@@ -260,25 +258,40 @@ process BOWTIE2_MAP_READS{
 /*
  * MaxBin2 binning of assembled contigs
  */
-process SAMTOOLS_SORT{
-    tag "SAMTOOLS_SORT ${reads_mapped}"
-    publishDir ("${params.outdir}/bowtie2_out/mapped", mode: 'copy')
+process MAXBIN2_BIN {
+    tag "MAXBIN2_BIN ${assembly}"
+    publishDir ("${params.outdir}/MaxBin2", mode: 'copy')
 
     input:
-    path( reads_mapped )
+    tuple val( sample_id ), path( assembly )
+    tuple val( sample_id ), path( reads_trimmed )
 
     output:
-    path( "${reads_mapped.simpleName}_sorted.bam*" ), emit: aligned_bam  
-
+    path("*.fasta")   , emit: binned_fastas
+    path("*.summary")    , emit: summary
+    path("*.log")     , emit: log
+    path("*.marker")  , emit: marker_counts
+    path("*.noclass") , emit: unbinned_fasta
+    path("*.tooshort"), emit: tooshort_fasta
+    path("*.abund*")  , emit: abundance, optional: true
+    path("*_bin.tar.gz") , emit: marker_bins , optional: true
+        
     script:
     """
-    samtools view -@ 2 -b -S -h ${reads_mapped}| samtools sort -o ${reads_mapped.simpleName}_sorted.bam 
-    samtools index -b ${reads_mapped.simpleName}_sorted.bam
+    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2 -reads ${reads_trimmed[0]} -reads2 ${reads_trimmed[1]} 
     """
+    //getting an inital error of run_MaxBin.pl: command not found-looking into it-mamba install maxbin2 
     stub:
     """
-    touch ${reads_mapped.simpleName}.bam
-    touch ${reads_mapped.simpleName}.bam.bai
+    mkdir MaxBin2
+    touch MaxBin2.fasta
+    touch MaxBin2.summary
+    touch MaxBin2.log
+    touch MaxBin2.marker
+    touch MaxBin2.noclass
+    touch MaxBin2.tooshort
+    touch MaxBin2.abundstub
+    touch MaxBin2_bin.tar.gz
     """
 }
 /*
