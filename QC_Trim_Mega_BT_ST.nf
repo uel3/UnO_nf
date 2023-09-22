@@ -51,7 +51,8 @@ workflow {
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, trimmed_reads_ch.trimmed_reads )
-    metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, mapped_reads_ch.aligned_bam )
+    bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
+    metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
     // Enter the rest of the processes for variant calling based on the bash script below
 
 }
@@ -298,37 +299,59 @@ process MAXBIN2_BIN {
     """
 }
 /*
- * MetaBat2 binning of assembled contigs
+ * JGIsummarizeBAMcontigdepths script wihtin metabat2 
+ */
+ process METABAT2_JGISUMMARIZECONTIGDEPTHS {
+    tag "METABAT2_JGISUMMARIZECONTIGDEPTHS ${aligned_bam_file}"
+    publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
+
+    input:
+    path( aligned_bam_file )
+    
+    output:
+    path( "${aligned_bam_file.simpleName}.depth.txt" ) , emit: bam_contig_depth
+
+    script:
+    """
+    jgi_summarize_bam_contig_depths --outputDepth ${aligned_bam_file.simpleName}.depth.txt ${aligned_bam_file}
+    """
+
+    stub:
+    """
+    mkdir MetaBat2
+    touch ${aligned_bam_file.simpleName}.depth.txt
+    """
+ }
+ /*
+ * MetaBat2 binning of assembled contig
  */
 process METABAT2_BIN {
-    tag "METABAT2_BIN ${assembly} ${aligned_bam_file}"
+    tag "METABAT2_BIN ${assembly} ${depth}"
     publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
 
     input:
     tuple val( sample_id ), path( assembly )
-    path( aligned_bam_file )
+    path( depth )
 
     output:
-    path( "${assembly}.depth.txt" )                                             , emit: metabat2_depth
+    //path( "${assembly}.depth.txt" )                                             , emit: metabat2_depth
     //path( "${assembly}.unbinned.fa" )                                           , emit: unbinned
-    path( "${assembly}.paired.txt" )                                            , emit: summary
-    path( "${assembly}.metabat-bins/*.fa" )                         , emit: binned_fastas
+    //path( "${assembly}.paired.txt" )                                            , emit: summary
+    path( "bins/${assembly.simpleName}_bin*.fa" )                                     , emit: binned_fastas
         
     script:
     """
-    runMetaBat.sh -i ${assembly} ${aligned_bam_file}
+    metabat2 -i ${assembly} -a ${depth} -o bins/${assembly.simpleName}_bin
     """
     //mag has additonal code to zip the fasta bins--might consider to cut down on space
-    //having issues running as is--error is Could not find the expected bam file: -o, -o is supposed to be the bin prefix-removing extra flags to avoid errors
-    //newest error is the depth file which is produced by jgi_depth function in metabat2-possibly need to add script
+    //resolved issues by adding jgi_depth set and by calling metabat2 instead of runMetaBat.sh
+    //formatted bin outdir correctly for legibility 
     stub:
     """
-    mkdir MetaBat2
-    touch ${assembly}.depth.txt
     touch ${assembly}.paired.txt
     touch ${assembly}.unbinned.fa
-    mkdir ${assembly}.metabat-bins
-    touch ${assembly}.metabat-bins/stub.fa
+    mkdir bins
+    touch bins/${assembly.simpleName}_bin.stub.fa
     """
 }
 
