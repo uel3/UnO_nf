@@ -51,6 +51,7 @@ workflow {
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, trimmed_reads_ch.trimmed_reads )
+    metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, mapped_reads_ch.aligned_bam )
     // Enter the rest of the processes for variant calling based on the bash script below
 
 }
@@ -237,7 +238,8 @@ process BOWTIE2_MAP_READS {
     
     
     output:
-    path( "${sample_id}_sorted.bam*" ), emit: aligned_bam 
+    path( "${sample_id}_sorted.bam" ), emit: aligned_bam
+    path( "${sample_id}_sorted.bam.bai"), emit: aligned_bam_index 
     //path( "${sample_id}.bowtie2.log" ), emit: align_log
 
     script:
@@ -267,20 +269,21 @@ process MAXBIN2_BIN {
     tuple val( sample_id ), path( reads_trimmed )
 
     output:
-    path("*.fasta")   , emit: binned_fastas
-    path("*.summary")    , emit: summary
-    path("*.log")     , emit: log
-    path("*.marker")  , emit: marker_counts
-    path("*.noclass") , emit: unbinned_fasta
-    path("*.tooshort"), emit: tooshort_fasta
-    path("*.abund*")  , emit: abundance, optional: true
-    path("*_bin.tar.gz") , emit: marker_bins , optional: true
+    path( "*.fasta" )   , emit: binned_fastas
+    path( "*.summary" ) , emit: summary
+    path( "*.log" )     , emit: log
+    path( "*.marker" )  , emit: marker_counts
+    path( "*.noclass" ) , emit: unbinned_fasta
+    path( "*.tooshort" ), emit: tooshort_fasta
+    path( "*.abund*" )  , emit: abundance, optional: true
+    path( "*_bin.tar.gz" ) , emit: marker_bins , optional: true
         
     script:
     """
     run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2 -reads ${reads_trimmed[0]} -reads2 ${reads_trimmed[1]} 
     """
     //getting an inital error of run_MaxBin.pl: command not found-looking into it-mamba install maxbin2 
+    //mag has additonal code to zip the fasta bins--might consider to cut down on space
     stub:
     """
     mkdir MaxBin2
@@ -294,6 +297,41 @@ process MAXBIN2_BIN {
     touch MaxBin2_bin.tar.gz
     """
 }
+/*
+ * MetaBat2 binning of assembled contigs
+ */
+process METABAT2_BIN {
+    tag "METABAT2_BIN ${assembly} ${aligned_bam_file}"
+    publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
+
+    input:
+    tuple val( sample_id ), path( assembly )
+    path( aligned_bam_file )
+
+    output:
+    path( "${assembly}.depth.txt" )                                             , emit: metabat2_depth
+    //path( "${assembly}.unbinned.fa" )                                           , emit: unbinned
+    path( "${assembly}.paired.txt" )                                            , emit: summary
+    path( "${assembly}.metabat-bins/*.fa" )                         , emit: binned_fastas
+        
+    script:
+    """
+    runMetaBat.sh -i ${assembly} ${aligned_bam_file}
+    """
+    //mag has additonal code to zip the fasta bins--might consider to cut down on space
+    //having issues running as is--error is Could not find the expected bam file: -o, -o is supposed to be the bin prefix-removing extra flags to avoid errors
+    //newest error is the depth file which is produced by jgi_depth function in metabat2-possibly need to add script
+    stub:
+    """
+    mkdir MetaBat2
+    touch ${assembly}.depth.txt
+    touch ${assembly}.paired.txt
+    touch ${assembly}.unbinned.fa
+    mkdir ${assembly}.metabat-bins
+    touch ${assembly}.metabat-bins/stub.fa
+    """
+}
+
 /*
 ========================================================================================
    Workflow Event Handler
