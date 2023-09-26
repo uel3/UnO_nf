@@ -367,16 +367,18 @@ process METAQUAST_EVAL {
     tuple val( sample_id ), path( assembly )
 
     output:
-    path( "${assembly.simpleName}/icarus.html" )                    , emit: icarus
-    path( "${assembly.simpleName}/metaquast.log" )                  , emit: metaquast_log
-    path( "${assembly.simpleName}/report.html" )                    , emit: metaquast_report
-    path( "${assembly.simpleName}/combined_reference/*" )           , emit: combined_references
-    path( "${assembly.simpleName}/icarus_viewers/*" )               , emit: icarus_viewers
-    path( "${assembly.simpleName}/krona_charts" )                   , emit: krona_charts
-    path( "${assembly.simpleName}/not_aligned/*" )                  , emit: metaquast_unaligned
-    path( "${assembly.simpleName}/quast_downloaded_references*" )   , emit: quast_references
-    path( "${assembly.simpleName}/runs_per_reference/*" )           , emit: runs_reference
-    path( "${assembly.simpleName}/summary*" )                       , emit: summary
+    path( "${assembly.simpleName}/*" )                   , emit: quast_qc
+    //path( "${assembly.simpleName}/icarus.html" )                    , emit: icarus
+    //path( "${assembly.simpleName}/metaquast.log" )                  , emit: metaquast_log
+    //path( "${assembly.simpleName}/report.html" )                    , emit: metaquast_report
+    //path( "${assembly.simpleName}/combined_reference/*" )           , emit: combined_references
+    //path( "${assembly.simpleName}/icarus_viewers/*" )               , emit: icarus_viewers
+    //path( "${assembly.simpleName}/krona_charts" )                   , emit: krona_charts
+    //path( "${assembly.simpleName}/not_aligned/*" )                  , emit: metaquast_unaligned
+    //path( "${assembly.simpleName}/quast_downloaded_references*" )   , emit: quast_references
+    //path( "${assembly.simpleName}/runs_per_reference/*" )           , emit: runs_reference
+    //path( "${assembly.simpleName}/summary*" )                       , emit: summary
+   
     script:
     """
     metaquast.py -o ${assembly.simpleName} -t 8 ${assembly}
@@ -386,24 +388,25 @@ process METAQUAST_EVAL {
     """
     mkdir Metaquast_out
     mkdir ${assembly.simpleName}
-    touch ${assembly.simpleName}/icarus.html
-    touch ${assembly.simpleName}/metaquast.log
-    touch ${assembly.simpleName}/report.html
-    mkdir combined_reference
-    touch ${assembly.simpleName}/combined_reference/*
-    mkdir icarus_viewers
-    touch ${assembly.simpleName}/icarus_viewers/*
-    mkdir krona_charts
-    touch ${assembly.simpleName}/krona_charts
-    mkdir not_aligned
-    touch ${assembly.simpleName}/not_aligned/*
-    mkdir quast_downloaded_references
-    touch ${assembly.simpleName}/quast_downloaded_references*
-    mkdir runs_per_reference
-    touch ${assembly.simpleName}/runs_per_reference/*
-    mkdir summary 
-    touch ${assembly.simpleName}/summary*
+    touch ${assembly.simpleName}/*
     """
+    //touch ${assembly.simpleName}/metaquast.log
+    //touch ${assembly.simpleName}/report.html
+    //mkdir combined_reference
+    //touch ${assembly.simpleName}/combined_reference/*
+    //mkdir icarus_viewers
+    //touch ${assembly.simpleName}/icarus_viewers/*
+    //mkdir krona_charts
+    //touch ${assembly.simpleName}/krona_charts
+    //mkdir not_aligned
+    //touch ${assembly.simpleName}/not_aligned/*
+    //mkdir quast_downloaded_references
+    //touch ${assembly.simpleName}/quast_downloaded_references*
+    //mkdir runs_per_reference
+    //touch ${assembly.simpleName}/runs_per_reference/*
+    //mkdir summary 
+    //touch ${assembly.simpleName}/summary*
+
 }
 /*
 ========================================================================================
