@@ -97,7 +97,7 @@ process MIDAS2_SPECIES {
     path( "${sample_id}/species/log.txt")
     path( "${sample_id}/species/species_profile.tsv" ), emit: species_id
 
-    script:
+    script: //getting an error that midas2 cannot find hs-blastn but it is in the midas_changes env located :/scicomp/home-pure/uel3/.conda/envs/midas_changed/bin/hs-blastn
     """
     midas2 run_species \
       --sample_name ${sample_id} \
