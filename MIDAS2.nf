@@ -40,11 +40,11 @@ reads_ch = Channel.fromFilePairs( params.reads, checkIfExists: true )
 
 workflow {
 
-    MIDAS2_DB_BUILD ()
-    //MIDAS2_SPECIES( reads_ch )
-    //MIDAS2_SNPS ( midas_species_ch )
+    midasdb_uhgg_ch = MIDAS2_DB_BUILD ()
+    midas2_species_ch = MIDAS2_SPECIES( reads_ch )
+    //midas2_snps_ch = MIDAS2_SNPS ( midas_species_ch )
     //MIDAS2_PARSE( midas_species_ch, midas_snps_ch )
-    // Enter the rest of the processes for variant calling based on the bash script below
+    //Enter the rest of the processes for variant calling based on the bash script below
 
 }
 
@@ -65,7 +65,7 @@ process MIDAS2_DB_BUILD {
     
     output:
     path( "my_midasdb_uhgg/*" ), emit: uhgg_db
-    path( "my_midasdb_uhgg/metadata.tsv"), emit: db_file
+    path( "my_midasdb_uhgg/metadata.tsv" ), emit: db_file
 
     script:
     """
@@ -87,27 +87,35 @@ process MIDAS2_SPECIES {
     label 'process_low'
 
     publishDir("${params.outdir}/midas2_output", mode: 'copy') 
-    
+    conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
+
     input:
     tuple val( sample_id ), path( reads )
+    //path( uhgg_db )
 
     output:
-    path(  ), emit: uhgg_db
+    path( "${sample_id}/species/log.txt")
+    path( "${sample_id}/species/species_profile.tsv" ), emit: species_id
 
     script:
     """
     midas2 run_species \
-      --sample_name ${sample_name} \
-      -1 reads/${sample_name}_1.fastq \ #depening on cwd, need to provide path to reads
-      -2 reads/${sample_name}_2.fastq \ #for paired end read, need the supply both
-      --midasdb_name uhgg \ #calls the db to use, list of names stored as keys in MIDAS script
-      --midasdb_dir my_midasdb_uhgg \ #Path to local MIDAS Database, this requires downloading the db prior to running
+      --sample_name ${sample_id} \
+      -1 ${reads[0]} \
+      -2 ${reads[1]} \
+      --midasdb_name uhgg \
+      --midasdb_dir my_midasdb_uhgg \
       --num_cores 4 \
       midas2_output
     """
 
     stub:
     """
+    mkdir MIDAS2
+    mkdir ${sample_id}
+    mkdir species
+    touch ${sample_id}/species/log.txt
+    touch ${sample_id}/species/species_profile.tsv
     
     """
 }
@@ -129,11 +137,11 @@ process MIDAS2_SNPS {
     script:
     """
     midas2 run_snps \
-      --sample_name ${sample_name} \
-      -1 reads/${sample_name}_1.fastq \
-      -2 reads/${sample_name}_2.fastq \ 
-      --midasdb_name uhgg \ 
-      --midasdb_dir my_midasdb_uhgg \ 
+      --sample_name ${sample_id}} \
+      -1 ${reads[0]} \
+      -2 ${reads[0]} \
+      --midasdb_name uhgg \
+      --midasdb_dir ${uhgg_db} \
       --select_by median_marker_coverage,unique_fraction_covered \
       --select_threshold=2,0.5 \
       --num_cores 4 \
