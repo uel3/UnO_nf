@@ -118,6 +118,8 @@ process MIDAS2_SPECIES {
     touch ${sample_id}/species/species_profile.tsv
     
     """
+    // a run through of this process resulted in a command error that stopped the process-this output was '[ScoreBlkKbpUngappedCalc] Warning: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence. Please verify the query sequence(s) and/or filtering options.' 
+    //this type of error should not stop the process going to add an ignore error statement to see if it will work even with the warning 
 }
 /*
  * MIDAS2 run snps to get narrowed down list of potential species in sample. 

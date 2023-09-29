@@ -18,3 +18,5 @@
 /work
 /workflow.nf
 /MIDAS2/
+conda_env_check.nf
+midas2_UnO.yml

@@ -409,6 +409,24 @@ process METAQUAST_EVAL {
 
 }
 /*
+*Initial Taxonominc profile of trimmed reads using MIDAS2 (midas_changed conda env)
+*/
+process MIDAS2_DB_BUILD {
+    tag "MIDAS2_DB_BUILD ${db}}"
+    publishDir ("${params.outdir}/MIDAS_uhgg", mode: 'copy')
+    conda 
+
+    input:
+    output:
+    script:
+    """
+    """
+    stub:
+    """
+    """
+}
+
+/*
 ========================================================================================
    Workflow Event Handler
 ========================================================================================
