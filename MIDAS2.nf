@@ -60,7 +60,7 @@ process MIDAS2_DB_BUILD {
     tag{"MIDAS2_DB_BUILD ughh_db"}
     label 'process_low'
 
-    publishDir("${params.outdir}", mode: 'copy') //do I want to copy this--probably not--just link it
+    publishDir("${params.outdirls}", mode: 'copy') //do I want to copy this--probably not--just link it
     conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
     
     output:
@@ -83,6 +83,7 @@ process MIDAS2_DB_BUILD {
  * MIDAS2 run species to get list of potential species in sample. 
  */
 process MIDAS2_SPECIES {
+    errorStrategy 'ignore'
     tag{"MIDAS2_SPECIES ${reads}"}
     label 'process_low'
 
@@ -96,6 +97,7 @@ process MIDAS2_SPECIES {
     output:
     path( "${sample_id}/species/log.txt")
     path( "${sample_id}/species/species_profile.tsv" ), emit: species_id
+    path( "${sample_id}/temp" )
 
     script: //getting an error that midas2 cannot find hs-blastn but it is in the midas_changes env located :/scicomp/home-pure/uel3/.conda/envs/midas_changed/bin/hs-blastn
     """
@@ -120,6 +122,7 @@ process MIDAS2_SPECIES {
     """
     // a run through of this process resulted in a command error that stopped the process-this output was '[ScoreBlkKbpUngappedCalc] Warning: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence. Please verify the query sequence(s) and/or filtering options.' 
     //this type of error should not stop the process going to add an ignore error statement to see if it will work even with the warning 
+    //adding the ignore statement allows the process to run but I am not getting the correct output
 }
 /*
  * MIDAS2 run snps to get narrowed down list of potential species in sample. 
