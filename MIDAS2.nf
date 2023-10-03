@@ -83,7 +83,7 @@ process MIDAS2_DB_BUILD {
  * MIDAS2 run species to get list of potential species in sample. 
  */
 process MIDAS2_SPECIES {
-    //errorStrategy 'ignore'
+    errorStrategy 'ignore'
     tag{"MIDAS2_SPECIES ${reads}"}
     label 'process_low'
 
@@ -95,12 +95,12 @@ process MIDAS2_SPECIES {
     //path( uhgg_db )
 
     output:
-    path( "midas2_output/${sample_id}/species/log.txt")
+    path( "midas2_output/${sample_id}/species/log.txt" )
     path( "midas2_output/${sample_id}/species/species_profile.tsv" ), emit: species_id
-    path( "midas2_output/${sample_id}/temp/*" )
+    path( "midas2_output/${sample_id}/temp/*" ), optional: true //adding the optional: true keeps ne from throwing error
 
     script: //getting an error that midas2 cannot find hs-blastn but it is in the midas_changes env located :/scicomp/home-pure/uel3/.conda/envs/midas_changed/bin/hs-blastn
-    //need to include -profile conda when running the script to activate the correct environment $nextflow run MIDAS2.nf -profile conda
+    //need to include -profile conda when running the script to activate the correct environment $nextflow run MIDAS2.nf -profile conda sge
     """
     midas2 run_species \
       --sample_name ${sample_id} \
@@ -108,7 +108,7 @@ process MIDAS2_SPECIES {
       -2 ${reads[1]} \
       --midasdb_name uhgg \
       --midasdb_dir my_midasdb_uhgg \
-      --num_cores 4 \
+      --num_cores 8 \
       midas2_output
     """
 
@@ -125,6 +125,7 @@ process MIDAS2_SPECIES {
     // a run through of this process resulted in a command error that stopped the process-this output was '[ScoreBlkKbpUngappedCalc] Warning: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence. Please verify the query sequence(s) and/or filtering options.' 
     //this type of error should not stop the process going to add an ignore error statement to see if it will work even with the warning 
     //adding the ignore statement allows the process to run but I am not getting the correct output-required me to restructure my outputs-since the outdir is called in the script, I needed to remove it from my publishDir call but also include it expected output
+    //still not getting output to the outdir-it is in the owr==work directory 
 }
 /*
  * MIDAS2 run snps to get narrowed down list of potential species in sample. 
