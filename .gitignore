@@ -20,3 +20,15 @@
 /MIDAS2/
 conda_env_check.nf
 midas2_UnO.yml
+null/my_midasdb_uhgg/md5sum.json
+null/my_midasdb_uhgg/genomes.tsv
+null/my_midasdb_uhgg/markers/phyeco/phyeco.fa
+.gitignore
+null/my_midasdb_uhgg/markers/phyeco/phyeco.fa.header
+null/my_midasdb_uhgg/chunks
+null/my_midasdb_uhgg/markers_models/phyeco/marker_genes.hmm
+null/my_midasdb_uhgg/markers/phyeco/phyeco.fa.bwt
+null/my_midasdb_uhgg/markers/phyeco/phyeco.fa.sequence
+null/my_midasdb_uhgg/markers_models/phyeco/marker_genes.mapping_cutoffs
+null/my_midasdb_uhgg/markers/phyeco/phyeco.map
+null/my_midasdb_uhgg/markers/phyeco/phyeco.fa.sa
