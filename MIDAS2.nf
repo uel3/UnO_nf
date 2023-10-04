@@ -42,7 +42,7 @@ workflow {
 
     midasdb_uhgg_ch = MIDAS2_DB_BUILD ()
     midas2_species_ch = MIDAS2_SPECIES( reads_ch )
-    //midas2_snps_ch = MIDAS2_SNPS ( midas_species_ch )
+    midas2_snps_ch = MIDAS2_SNPS ( reads_ch, midas2_species_ch.species_id )
     //MIDAS2_PARSE( midas_species_ch, midas_snps_ch )
     //Enter the rest of the processes for variant calling based on the bash script below
 
@@ -97,7 +97,7 @@ process MIDAS2_SPECIES {
     output:
     path( "midas2_output/${sample_id}/species/log.txt" )
     path( "midas2_output/${sample_id}/species/species_profile.tsv" ), emit: species_id
-    path( "midas2_output/${sample_id}/temp/*" ), optional: true //adding the optional: true keeps ne from throwing error
+    path( "midas2_output/${sample_id}/temp/*" ), optional: true //adding the optional: true keeps nf from throwing error
 
     script: //getting an error that midas2 cannot find hs-blastn but it is in the midas_changes env located :/scicomp/home-pure/uel3/.conda/envs/midas_changed/bin/hs-blastn
     //need to include -profile conda when running the script to activate the correct environment $nextflow run MIDAS2.nf -profile conda sge
@@ -134,30 +134,48 @@ process MIDAS2_SNPS {
     tag{"MIDAS2_SNPS ${reads}"}
     label 'process_low'
 
-    publishDir("${params.outdir}/midas2_output", mode: 'copy')
+    publishDir("${params.outdir}", mode: 'copy')
+    conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
     
     input:
     tuple val( sample_id ), path( reads )
+    path( species_profile )
 
     output:
-    path( "" ), emit: midas2_snps
-
+    path( "midas2_output/${sample_id}/snps/log.txt" )
+    path( "midas2_output/${sample_id}/snps/snps_summary.tsv"), emit: midas2_snps
+    path( "midas2_output/${sample_id}/snps/*.snps.tsv.lz4" )
+    path( "midas2_output/${sample_id}/bt2_indexes/snps/*" )
+   
+   //run_snps isn't working because it requires output from run_species-need to add a when statement to ensure run_snps occurs after run_species
+   //when: midas2_output/${sample_id}/species/species_profile.tsv or species_id
     script:
-    """
+   """
     midas2 run_snps \
-      --sample_name ${sample_id}} \
+      --sample_name ${sample_id} \
       -1 ${reads[0]} \
-      -2 ${reads[0]} \
+      -2 ${reads[1]} \
       --midasdb_name uhgg \
-      --midasdb_dir ${uhgg_db} \
+      --midasdb_dir my_midasdb_uhgg \
       --select_by median_marker_coverage,unique_fraction_covered \
       --select_threshold=2,0.5 \
-      --num_cores 4 \
+      --num_cores 8 \
       midas2_output
     """
+    when:
+    file("MIDAS2/midas2_output/${sample_id}/species/species_profile.tsv").isFile() //this did not work
 
     stub:
     """
+    mkdir midas2_output
+    mkdir midas2_output/${sample_id}
+    mkdir midas2_output/${sample_id}/bt2_indexes
+    mkdir midas2_output/${sample_id}/bt2_indexes/snps
+    touch midas2_output/${sample_id}/bt2_indexes/snps/stub
+    mkdir midas2_output/${sample_id}/snps
+    touch midas2_output/${sample_id}/snps/log.txt
+    touch midas2_output/${sample_id}/snps/snps_summary.tsv
+    touch midas2_output/${Sample_id}/snps/stub.snps.tsv.lz4
     """
 }
 /*
