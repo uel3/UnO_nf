@@ -42,7 +42,7 @@ workflow {
 
     midasdb_uhgg_ch = MIDAS2_DB_BUILD ()
     midas2_species_ch = MIDAS2_SPECIES( reads_ch )
-    midas2_snps_ch = MIDAS2_SNPS ( reads_ch, midas2_species_ch.species_id )
+    midas2_snps_ch = MIDAS2_SNPS ( reads_ch )
     //MIDAS2_PARSE( midas_species_ch, midas_snps_ch )
     //Enter the rest of the processes for variant calling based on the bash script below
 
@@ -92,7 +92,6 @@ process MIDAS2_SPECIES {
 
     input:
     tuple val( sample_id ), path( reads )
-    //path( uhgg_db )
 
     output:
     path( "midas2_output/${sample_id}/species/log.txt" )
@@ -139,7 +138,9 @@ process MIDAS2_SNPS {
     
     input:
     tuple val( sample_id ), path( reads )
-    path( species_profile )
+    //path( species_out )
+    //path( species_log )
+    //path( species_temp )
 
     output:
     path( "midas2_output/${sample_id}/snps/log.txt" )
@@ -149,7 +150,7 @@ process MIDAS2_SNPS {
    
    //run_snps isn't working because it requires output from run_species-need to add a when statement to ensure run_snps occurs after run_species
    //when: midas2_output/${sample_id}/species/species_profile.tsv or species_id
-    script:
+   script:
    """
     midas2 run_snps \
       --sample_name ${sample_id} \
@@ -162,8 +163,9 @@ process MIDAS2_SNPS {
       --num_cores 8 \
       midas2_output
     """
-    when:
-    file("MIDAS2/midas2_output/${sample_id}/species/species_profile.tsv").isFile() //this did not work
+    //when:
+    // Specify a condition to trigger this process, e.g., when the required files exist.
+    // file(species).isDirectory()
 
     stub:
     """
