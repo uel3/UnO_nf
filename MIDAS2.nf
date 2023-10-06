@@ -41,8 +41,7 @@ reads_ch = Channel.fromFilePairs( params.reads, checkIfExists: true )
 workflow {
 
     midasdb_uhgg_ch = MIDAS2_DB_BUILD ()
-    midas2_species_ch = MIDAS2_SPECIES( reads_ch )
-    midas2_snps_ch = MIDAS2_SNPS ( reads_ch )
+    midas2_species_ch = MIDAS2_SPECIES_SNPS( reads_ch )
     //MIDAS2_PARSE( midas_species_ch, midas_snps_ch )
     //Enter the rest of the processes for variant calling based on the bash script below
 
@@ -82,8 +81,8 @@ process MIDAS2_DB_BUILD {
 /*
  * MIDAS2 run species to get list of potential species in sample. 
  */
-process MIDAS2_SPECIES {
-    errorStrategy 'ignore'
+process MIDAS2_SPECIES_SNPS {
+    //errorStrategy 'ignore'
     tag{"MIDAS2_SPECIES ${reads}"}
     label 'process_low'
 
@@ -97,6 +96,11 @@ process MIDAS2_SPECIES {
     path( "midas2_output/${sample_id}/species/log.txt" )
     path( "midas2_output/${sample_id}/species/species_profile.tsv" ), emit: species_id
     path( "midas2_output/${sample_id}/temp/*" ), optional: true //adding the optional: true keeps nf from throwing error
+    path( "midas2_output/${sample_id}/snps/log.txt" )
+    path( "midas2_output/${sample_id}/snps/snps_summary.tsv"), emit: midas2_snps
+    path( "midas2_output/${sample_id}/snps/*.snps.tsv.lz4" )
+    path( "midas2_output/${sample_id}/bt2_indexes/snps/*" ), optional: true
+   
 
     script: //getting an error that midas2 cannot find hs-blastn but it is in the midas_changes env located :/scicomp/home-pure/uel3/.conda/envs/midas_changed/bin/hs-blastn
     //need to include -profile conda when running the script to activate the correct environment $nextflow run MIDAS2.nf -profile conda sge
@@ -107,6 +111,16 @@ process MIDAS2_SPECIES {
       -2 ${reads[1]} \
       --midasdb_name uhgg \
       --midasdb_dir my_midasdb_uhgg \
+      --num_cores 8 \
+      midas2_output
+    midas2 run_snps \
+      --sample_name ${sample_id} \
+      -1 ${reads[0]} \
+      -2 ${reads[1]} \
+      --midasdb_name uhgg \
+      --midasdb_dir my_midasdb_uhgg \
+      --select_by median_marker_coverage,unique_fraction_covered \
+      --select_threshold=2,0.5 \
       --num_cores 8 \
       midas2_output
     """
@@ -120,11 +134,18 @@ process MIDAS2_SPECIES {
     touch midas2_output/${sample_id}/species/species_profile.tsv
     mkdir midas2_output/${sample_id}/temp
     touch midas2_output/${sample_id}/temp/stub
+    mkdir midas2_output/${sample_id}/bt2_indexes
+    mkdir midas2_output/${sample_id}/bt2_indexes/snps
+    touch midas2_output/${sample_id}/bt2_indexes/snps/stub
+    mkdir midas2_output/${sample_id}/snps
+    touch midas2_output/${sample_id}/snps/log.txt
+    touch midas2_output/${sample_id}/snps/snps_summary.tsv
+    touch midas2_output/${Sample_id}/snps/stub.snps.tsv.lz4
     """
     // a run through of this process resulted in a command error that stopped the process-this output was '[ScoreBlkKbpUngappedCalc] Warning: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence. Please verify the query sequence(s) and/or filtering options.' 
     //this type of error should not stop the process going to add an ignore error statement to see if it will work even with the warning 
     //adding the ignore statement allows the process to run but I am not getting the correct output-required me to restructure my outputs-since the outdir is called in the script, I needed to remove it from my publishDir call but also include it expected output
-    //still not getting output to the outdir-it is in the owr==work directory 
+    
 }
 /*
  * MIDAS2 run snps to get narrowed down list of potential species in sample. 
@@ -148,8 +169,7 @@ process MIDAS2_SNPS {
     path( "midas2_output/${sample_id}/snps/*.snps.tsv.lz4" )
     path( "midas2_output/${sample_id}/bt2_indexes/snps/*" )
    
-   //run_snps isn't working because it requires output from run_species-need to add a when statement to ensure run_snps occurs after run_species
-   //when: midas2_output/${sample_id}/species/species_profile.tsv or species_id
+   //run_snps isn't working because it requires output from run_species-adding run_snpns to proces MIDAS2_SPECIES gets around this error - also how this is handled in MIDAS nf module 
    script:
    """
     midas2 run_snps \
