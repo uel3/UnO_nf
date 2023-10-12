@@ -54,6 +54,10 @@ workflow {
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
     metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
     metaquast_ch = METAQUAST_EVAL ( megahit_assembly_ch.megahit_contigs )
+    contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
+    //refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch, max_bin_ch, metabat_bins_ch)
+    //bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch)
+    //taxonomic_classification = SOMETAXTOOLS()metabat_bins_ch
     // Enter the rest of the processes for variant calling based on the bash script below
 
 }
@@ -338,11 +342,11 @@ process METABAT2_BIN {
     //path( "${assembly}.depth.txt" )                                             , emit: metabat2_depth
     //path( "${assembly}.unbinned.fa" )                                           , emit: unbinned
     //path( "${assembly}.paired.txt" )                                            , emit: summary
-    path( "bins/${assembly.simpleName}_bin*.fa" )                                     , emit: binned_fastas
+    path( "*.fa" )                                     , emit: binned_fastas //changing the struture of this to allow me to call the directory later 
         
     script:
     """
-    metabat2 -i ${assembly} -a ${depth} -o bins/${assembly.simpleName}_bin
+    metabat2 -i ${assembly} -a ${depth} -o ${assembly.simpleName}
     """
     //mag has additonal code to zip the fasta bins--might consider to cut down on space
     //resolved issues by adding jgi_depth set and by calling metabat2 instead of runMetaBat.sh
@@ -351,8 +355,7 @@ process METABAT2_BIN {
     """
     touch ${assembly}.paired.txt
     touch ${assembly}.unbinned.fa
-    mkdir bins
-    touch bins/${assembly.simpleName}_bin.stub.fa
+    touch ${assembly.simpleName}.fa
     """
 }
 //adding quast to environment via mamba 
@@ -409,21 +412,35 @@ process METAQUAST_EVAL {
 
 }
 /*
-*Initial Taxonominc profile of trimmed reads using MIDAS2 (midas_changed conda env)
+*Converting contigs bins into TSV files for DAStool
 */
-process MIDAS2_DB_BUILD {
-    tag "MIDAS2_DB_BUILD ${db}}"
-    publishDir ("${params.outdir}/MIDAS_uhgg", mode: 'copy')
-    conda 
-
+process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool environment-set for this process specifically 
+    tag "DASTOOL_CONTIG2BIN ${maxbin_fasta} ${metabat_fasta} "
+    publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
+    
+    //needed to add a conda profile for das_tool environment-set for this process specifically  
     input:
+    path( maxbin_fasta )
+    path( metabat_fasta )
+
+
     output:
-    script:
+    path("*.tsv"), emit: fastatocontig2bin
+    
+    script: //shortened output names to see if output is not longer empty -didn't work adding . as the input worked will need to include better names than just maxbin/metabat.contigs2bin.tsv but works for now 
     """
+    Fasta_to_Contig2Bin.sh -i . -e fa > maxbin.contigs2bin.tsv 
+    Fasta_to_Contig2Bin.sh -i . -e fasta > metabat.contigs2bin.tsv
+
     """
+
     stub:
     """
+    mkdir DASTool_out
+    touch DASTool_out/stub_maxbin.contigs2bin.tsv
+    touch DASTool_out/stub_metabat.contigs2bin.tsv
     """
+
 }
 
 /*

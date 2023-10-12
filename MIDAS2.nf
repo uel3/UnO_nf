@@ -42,7 +42,7 @@ workflow {
 
     midasdb_uhgg_ch = MIDAS2_DB_BUILD ()
     midas2_species_ch = MIDAS2_SPECIES_SNPS( reads_ch )
-    //MIDAS2_PARSE( midas_species_ch, midas_snps_ch )
+    MIDAS2_PARSE( midas2_species_ch.midas2_snps, midasdb_uhgg_ch.db_file )
     //Enter the rest of the processes for variant calling based on the bash script below
 
 }
@@ -204,25 +204,27 @@ process MIDAS2_SNPS {
  * Parse MIDAS2 output to get readable list of potential species in sample. 
  */
 process MIDAS2_PARSE {
-    tag{"MIDAS2_PARSE "} //need to include variables for species and snps MIDAS2 outputs
+    tag{"MIDAS2_PARSE ${midas2_snps_id}"} //need to include variables for species and snps MIDAS2 outputs
     label 'process_low'
 
     publishDir("${params.outdir}/midas2_output", mode: 'copy') 
 
     input:
-    tuple val( sample_id ), path( reads )
+    path ( midas2_snps_id )
+    path ( midas2_metadata )
 
     output:
-    path( "" ), emit: species_id_list
+    path( "midas2_output/${sample_id}/midas2_species_ID.txt" ), emit: snps_id_list
 
-    script:
+    shell:
+    """
+    awk 'NR==FNR{a[\$1] = \$18 " " \$19; next} \$1 in a {print a[\$1]}' ${midas2_snps_id} ${midas2_metadata} > midas2_species_ID.txt
     """
     
-    """
-
     stub:
     """
-   
+    mkdir midas2_ouptut/${sample_id}
+    mkdir midas2_ouptut/${sample_id}/midas2_species_ID.txt
     """
 }
 /*
