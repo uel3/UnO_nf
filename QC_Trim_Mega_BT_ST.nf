@@ -55,7 +55,7 @@ workflow {
     metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
     metaquast_ch = METAQUAST_EVAL ( megahit_assembly_ch.megahit_contigs )
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
-    //refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch, max_bin_ch, metabat_bins_ch)
+    refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
     //bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch)
     //taxonomic_classification = SOMETAXTOOLS()metabat_bins_ch
     // Enter the rest of the processes for variant calling based on the bash script below
@@ -425,7 +425,8 @@ process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool enviro
 
 
     output:
-    path("*.tsv"), emit: fastatocontig2bin
+    path("*maxbin.contigs2bin.tsv"), emit: maxbin2_fastatocontig2bin
+    path("*metabat.contigs2bin.tsv"), emit: metabat2_fastatocontig2bin
     
     script: //shortened output names to see if output is not longer empty -didn't work adding . as the input worked will need to include better names than just maxbin/metabat.contigs2bin.tsv but works for now 
     """
@@ -442,7 +443,42 @@ process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool enviro
     """
 
 }
+/*
+*Refining MaxBin2 and MetaBat2 bins with DASTool 
+*/
+process DASTOOL_BINNING {
+    tag "DASTOOL_BINNING ${maxbin_tsv} ${metabat_tsv} ${assembly} "
+    publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
 
+    input:
+    path( maxbin_tsv )
+    path( metabat_tsv )
+    tuple val( sample_id ), path( assembly )
+
+    output:
+    path("${assembly.simpleName}_refined_bins/DASTool_bins/*"), emit: dastool_bins
+    path("${assembly.simpleName}_refined_bins*")
+    
+    script:
+    """
+    DAS_Tool  -i ${maxbin_tsv},${metabat_tsv}\
+    -l MaxBin2, MetaBat2 \
+    -c ${assembly} \
+    -o ${assembly.simpleName}_refined_bins \
+    --write_bins
+    """
+
+    stub:
+    """
+    mkdir DASTool_out
+    touch DASTool_out/${assembly.simpleName}_refined_bins*
+    mkdir DASTool_out/${assembly.simpleName}_refined_bins
+    touch DASTool_out/${assembly.simpleName}_refined_bins/DASTool_bins/*
+    """
+// getting the following error when adding DASTOOL_BINNING Error in library(data.table, warn.conflicts = F, quietly = T) : 
+   /* there is no package called ‘data.table’
+  Calls: suppressMessages -> withCallingHandlers*/
+}
 /*
 ========================================================================================
    Workflow Event Handler
