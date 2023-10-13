@@ -73,8 +73,7 @@ workflow {
  */
 process FASTQC_RAW {
     tag{"FASTQC ${reads}"}
-    label 'process_low'
-
+    label 'UnO'
     publishDir("${params.outdir}/fastqc_raw", mode: 'copy')
     
     input:
@@ -102,8 +101,7 @@ process FASTQC_RAW {
  */
 process TRIMMOMATIC {
     tag{"TRIMMOMATIC ${reads}"}
-    label 'process_low'
-
+    label 'UnO'
     publishDir("${params.outdir}/trimmed_reads", mode: 'copy')
   
     input:
@@ -133,8 +131,7 @@ process TRIMMOMATIC {
  */
 process FASTQC_TRIMMED {
     tag{"FASTQC ${reads_trimmed}"}
-    label 'process_low'
-
+    label 'UnO'
     publishDir("${params.outdir}/fastqc_trimmed", mode: 'copy')
     
     input:
@@ -163,8 +160,7 @@ process FASTQC_TRIMMED {
  */
 process MEGAHIT {
     tag{"MEGAHIT ${reads_trimmed}"}
-    label 'process_low'
-    
+    label 'UnO'
     publishDir("${params.outdir}/megahit_out", mode: 'copy')
     
     input:
@@ -200,8 +196,7 @@ process MEGAHIT {
  */
 process BOWTIE2_INDEX {
     tag{"BOWTIE2_INDEX ${assembly}"}
-    label 'process_low'
-    
+    label 'UnO'
     publishDir("${params.outdir}/bowtie2_out", mode: 'copy')
 
     input:
@@ -233,6 +228,7 @@ process BOWTIE2_INDEX {
 */
 process BOWTIE2_MAP_READS {
     tag "BOWTIE2_MAP_READS ${index} ${reads_trimmed}" //"$assembler-$name"
+    label 'UnO'
     publishDir ("${params.outdir}/bowtie2_out/mapped", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
         //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
 
@@ -268,6 +264,7 @@ process BOWTIE2_MAP_READS {
  */
 process MAXBIN2_BIN {
     tag "MAXBIN2_BIN ${assembly}"
+    label 'UnO'
     publishDir ("${params.outdir}/MaxBin2", mode: 'copy')
 
     input:
@@ -308,6 +305,7 @@ process MAXBIN2_BIN {
  */
  process METABAT2_JGISUMMARIZECONTIGDEPTHS {
     tag "METABAT2_JGISUMMARIZECONTIGDEPTHS ${aligned_bam_file}"
+    label 'UnO'
     publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
 
     input:
@@ -332,6 +330,7 @@ process MAXBIN2_BIN {
  */
 process METABAT2_BIN {
     tag "METABAT2_BIN ${assembly} ${depth}"
+    label 'UnO'
     publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
 
     input:
@@ -364,6 +363,7 @@ process METABAT2_BIN {
 */
 process METAQUAST_EVAL {
     tag "METAQUAST_EVAL ${assembly}"
+    label 'UnO'
     publishDir ("${params.outdir}/Metaquast_out", mode: 'copy')
 
     input:
@@ -415,7 +415,9 @@ process METAQUAST_EVAL {
 *Converting contigs bins into TSV files for DAStool
 */
 process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool environment-set for this process specifically 
-    tag "DASTOOL_CONTIG2BIN ${maxbin_fasta} ${metabat_fasta} "
+    tag "DASTOOL_CONTIG2BIN ${maxbin_fasta} ${metabat_fasta}"
+    label 'dastool'
+
     publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
     
     //needed to add a conda profile for das_tool environment-set for this process specifically  
@@ -446,8 +448,9 @@ process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool enviro
 /*
 *Refining MaxBin2 and MetaBat2 bins with DASTool 
 */
-process DASTOOL_BINNING {
-    tag "DASTOOL_BINNING ${maxbin_tsv} ${metabat_tsv} ${assembly} "
+process DASTOOL_BINNING { //can provide link to conda environemnt with yml file. This may be helpful for dastool and MIDAS2 
+    tag "DASTOOL_BINNING ${maxbin_tsv} ${metabat_tsv} ${assembly}"
+    label 'dastool'
     publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
 
     input:
@@ -455,17 +458,28 @@ process DASTOOL_BINNING {
     path( metabat_tsv )
     tuple val( sample_id ), path( assembly )
 
-    output:
-    path("${assembly.simpleName}_refined_bins/DASTool_bins/*"), emit: dastool_bins
-    path("${assembly.simpleName}_refined_bins*")
+    output: //updating the output based on DASTool NF module output-this did nothing to change the error-per DASTool githun this is an error with command line syntax
+    path("*.log")                                      , emit: log
+    path("*_summary.tsv")              , optional: true, emit: summary
+    path("*_DASTool_contig2bin.tsv")   , optional: true, emit: contig2bin
+    path("*.eval")                     , optional: true, emit: eval
+    path("*_DASTool_bins/*.fa")        , optional: true, emit: bins
+    path("*.pdf")                      , optional: true, emit: pdfs
+    path("*.candidates.faa")           , optional: true, emit: fasta_proteins
+    path("*.faa")                      , optional: true, emit: candidates_faa
+    path("*.archaea.scg")              , optional: true, emit: fasta_archaea_scg
+    path("*.bacteria.scg")             , optional: true, emit: fasta_bacteria_scg
+    path("*.b6")                       , optional: true, emit: b6
+    path("*.seqlength")                , optional: true, emit: seqlength
     
     script:
     """
-    DAS_Tool  -i ${maxbin_tsv},${metabat_tsv}\
-    -l MaxBin2, MetaBat2 \
-    -c ${assembly} \
-    -o ${assembly.simpleName}_refined_bins \
-    --write_bins
+    DAS_Tool -i ${maxbin_tsv},${metabat_tsv}\
+    -c ${assembly}\
+    -o ${assembly.simpleName}_refined_bins\
+    -l MaxBin2,MetaBat2\
+    --write_bins\
+    --debug
     """
 
     stub:
@@ -475,9 +489,6 @@ process DASTOOL_BINNING {
     mkdir DASTool_out/${assembly.simpleName}_refined_bins
     touch DASTool_out/${assembly.simpleName}_refined_bins/DASTool_bins/*
     """
-// getting the following error when adding DASTOOL_BINNING Error in library(data.table, warn.conflicts = F, quietly = T) : 
-   /* there is no package called ‘data.table’
-  Calls: suppressMessages -> withCallingHandlers*/
 }
 /*
 ========================================================================================

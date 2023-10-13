@@ -57,7 +57,7 @@ workflow {
  */
 process MIDAS2_DB_BUILD {
     tag{"MIDAS2_DB_BUILD ughh_db"}
-    label 'process_low'
+    label 'midas2'//changing this to point to midas_changed env in config
 
     publishDir("${params.outdir}", mode: 'copy') //do I want to copy this--probably not--just link it
     conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
@@ -84,7 +84,7 @@ process MIDAS2_DB_BUILD {
 process MIDAS2_SPECIES_SNPS {
     //errorStrategy 'ignore'
     tag{"MIDAS2_SPECIES ${reads}"}
-    label 'process_low'
+    label 'midas2'
 
     publishDir("${params.outdir}", mode: 'copy') 
     conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
@@ -152,7 +152,7 @@ process MIDAS2_SPECIES_SNPS {
  */
 process MIDAS2_SNPS {
     tag{"MIDAS2_SNPS ${reads}"}
-    label 'process_low'
+    label 'midas2'
 
     publishDir("${params.outdir}", mode: 'copy')
     conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
@@ -205,7 +205,6 @@ process MIDAS2_SNPS {
  */
 process MIDAS2_PARSE {
     tag{"MIDAS2_PARSE ${midas2_snps_id}"} //need to include variables for species and snps MIDAS2 outputs
-    label 'process_low'
 
     publishDir("${params.outdir}/midas2_output", mode: 'copy') 
 
