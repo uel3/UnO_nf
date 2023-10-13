@@ -485,11 +485,22 @@ process DASTOOL_BINNING { //can provide link to conda environemnt with yml file.
     stub:
     """
     mkdir DASTool_out
+    touch DASTool_out/${assembly.simpleName}_refined_bins_DASTool_contig2bin.tsv
+    touch DASTool_out/${assembly.simpleName}_refined_bins_DASTool_summary.tsv   
     touch DASTool_out/${assembly.simpleName}_refined_bins*
     mkdir DASTool_out/${assembly.simpleName}_refined_bins
     touch DASTool_out/${assembly.simpleName}_refined_bins/DASTool_bins/*
     """
 }
+/*
+*Evaluating Bin qualoty with CheckM 
+*/
+process DASTOOL_BINNING { //can provide link to conda environemnt with yml file. This may be helpful for dastool and MIDAS2 
+    tag "DASTOOL_BINNING ${maxbin_tsv} ${metabat_tsv} ${assembly}"
+    label 'dastool'
+    publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
+}
+
 /*
 ========================================================================================
    Workflow Event Handler

@@ -213,11 +213,11 @@ process MIDAS2_PARSE {
     path ( midas2_metadata )
 
     output:
-    path( "midas2_output/${sample_id}/midas2_species_ID.txt" ), emit: snps_id_list
+    path( "midas2_species_ID.txt" ), emit: snps_id_list
 
     shell:
     """
-    awk 'NR==FNR{a[\$1] = \$18 " " \$19; next} \$1 in a {print a[\$1]}' ${midas2_snps_id} ${midas2_metadata} > midas2_species_ID.txt
+    awk 'NR==FNR{a[\$1]=\$0;next}\$1 in a{print a[\$1], \$18, \$19}' ${midas2_snps_id} ${midas2_metadata} > midas2_species_ID.txt
     """
     
     stub:
