@@ -56,7 +56,7 @@ workflow {
     metaquast_ch = METAQUAST_EVAL ( megahit_assembly_ch.megahit_contigs )
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
-    //bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch)
+    bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
     //taxonomic_classification = SOMETAXTOOLS()metabat_bins_ch
     // Enter the rest of the processes for variant calling based on the bash script below
 
@@ -486,19 +486,61 @@ process DASTOOL_BINNING { //can provide link to conda environemnt with yml file.
     """
     mkdir DASTool_out
     touch DASTool_out/${assembly.simpleName}_refined_bins_DASTool_contig2bin.tsv
-    touch DASTool_out/${assembly.simpleName}_refined_bins_DASTool_summary.tsv   
-    touch DASTool_out/${assembly.simpleName}_refined_bins*
-    mkdir DASTool_out/${assembly.simpleName}_refined_bins
-    touch DASTool_out/${assembly.simpleName}_refined_bins/DASTool_bins/*
+    touch DASTool_out/${assembly.simpleName}_refined_bins_DASTool_summary.tsv
+    touch DASTool_out/${assembly.simpleName}_refined_bins_DASTool.log
+    touch DASTool_out/${assembly.simpleName}_refined_bins_proteins.faa
+    touch DASTool_out/${assembly.simpleName}_refined_bins_proteins.faa.all.b6
+    touch DASTool_out/${assembly.simpleName}_refined_bins_proteins.faa.archaea.scg
+    touch DASTool_out/${assembly.simpleName}_refined_bins_proteins.faa.bacteria.scg
+    touch DASTool_out/${assembly.simpleName}_refined_bins_proteins.faa.findSCG.b6
+    touch DASTool_out/${assembly.simpleName}_refined_bins_proteins.faa.scg.candidates.faa
+    touch DASTool_out/${assembly.simpleName}_refined_bins.seqlength
+    mkdir DASTool_out/${assembly.simpleName}_refined_bins_DASTool_bins
+    touch DASTool_out/${assembly.simpleName}_refined_bins_DASTool_bins/Binner.fa
     """
 }
 /*
-*Evaluating Bin qualoty with CheckM 
+*Evaluating Bin quality with CheckM 
 */
-process DASTOOL_BINNING { //can provide link to conda environemnt with yml file. This may be helpful for dastool and MIDAS2 
-    tag "DASTOOL_BINNING ${maxbin_tsv} ${metabat_tsv} ${assembly}"
-    label 'dastool'
-    publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
+process CHECKM_REFINED { /*adding checkM to the environment downgrades some packages The following NEW packages will be INSTALLED:
+  htslib                                    1.18-h81da01d_0 --> 1.17-h81da01d_2
+  libdeflate                                1.19-hd590300_0 --> 1.18-h0b41bf4_0
+  libtiff                                  4.6.0-h29866fb_1 --> 4.6.0-h8b53f26_0*/
+    tag "DASTOOL_BINNING ${refined_bins}"
+    label 'UnO'
+    publishDir ("${params.outdir}", mode: 'copy')
+    
+    input:
+    path( refined_bins )
+    
+    output:
+    path("CheckM/bins/*")                                  ,  emit: checkm_bins
+    path("CheckM/checkm.log")                              ,  emit: checkm_log
+    path("CheckM/lineage.ms")                              ,  emit: marker_file
+    path("CheckM/storage/*.tsv")                           ,  emit: checkm_stats
+    path("CheckM/torage/aai_qa/*")                         , optional: true, emit: aai_qa
+    path("CheckM/storage/*_info.pkl.gz")                   , optional: true, emit: checkm_info 
+
+    script:
+    """
+    checkm lineage_wf -t 10 -x fa . CheckM
+    """
+    
+    stub:
+    """
+    mkdir CheckM
+    touch CheckM/lineage.ms
+    mkdir CheckM/bins
+    touch CheckM/bins/stub.bin
+    mkdir CheckM/storage
+    touch CheckM/storage/bin_stats.analyze.tsv
+    touch CheckM/storage/bin_stats_ext.tsv
+    touch CheckM/storage/bin_stats_tree.tsv
+    touch CheckM/storage/marker_gene_stats.tsv
+    touch CheckM/storage/stub_info.pkl.gz
+    mkdir CheckM/storage/aai_qa
+    touch CheckM/storage/aai_qa/stub
+    """
 }
 
 /*
