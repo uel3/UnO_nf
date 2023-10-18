@@ -12,9 +12,7 @@ nextflow.enable.dsl=2
 // Pipeline Input parameters
 
 params.outdir = 'results'
-//params.genome = "${launchDir}/data/ref_genome/ecoli_rel606.fasta"
 params.reads = "$HOME/coal_reads/*_{1,2}.fastq.gz"
-//params.adapter = "$HOME/metagenome_practice/trimmomatic_output/TruSeq3-PE.fa"
 
 println """\
          U n O - N F   P I P E L I N E
@@ -57,7 +55,10 @@ workflow {
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
-    //taxonomic_classification = SOMETAXTOOLS()metabat_bins_ch
+    //gene_prediction = SOMEGENEPREDICTTOOLS( )
+    //gene_annotation = GENEANNOTATIONTOOL( )
+    //taxonomic_classification = SOMETAXTOOLS( )
+    //mag_abundace_estimation =MAGABUNDANCETOOL( )
     // Enter the rest of the processes for variant calling based on the bash script below
 
 }
@@ -515,22 +516,24 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
     
     output:
     path("CheckM/bins/*")                                  ,  emit: checkm_bins
-    path("CheckM/checkm.log")                              ,  emit: checkm_log
+    path("CheckM/checkm.log")                              ,  optional: true, emit: checkm_log
     path("CheckM/lineage.ms")                              ,  emit: marker_file
+    path("CheckM/*.tsv")                                   ,  emit: checkm_output_qa 
     path("CheckM/storage/*.tsv")                           ,  emit: checkm_stats
-    path("CheckM/torage/aai_qa/*")                         , optional: true, emit: aai_qa
+    path("CheckM/storage/aai_qa/*")                        , optional: true, emit: aai_qa
     path("CheckM/storage/*_info.pkl.gz")                   , optional: true, emit: checkm_info 
+    path("CheckM/storage/tree/*")                          , optional: true, emit: tree
 
     script:
     """
-    checkm lineage_wf -t 10 -x fa . CheckM
+    checkm lineage_wf -t 10 -x fa -f CheckM/checkm_qa.tsv --tab_table . CheckM
     """
     
     stub:
     """
     mkdir CheckM
     touch CheckM/lineage.ms
-    mkdir CheckM/bins
+    mkdir CheckM/bins[
     touch CheckM/bins/stub.bin
     mkdir CheckM/storage
     touch CheckM/storage/bin_stats.analyze.tsv
