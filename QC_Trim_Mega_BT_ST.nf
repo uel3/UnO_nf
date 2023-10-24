@@ -29,7 +29,14 @@ println """\
 */
 
 //ref_ch = Channel.fromPath( params.genome, checkIfExists: true )  
-reads_ch = Channel.fromFilePairs( params.reads, checkIfExists: true ) 
+ reads_ch = Channel
+            .fromFilePairs(params.reads)
+            .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --single_end on the command line." }
+            .map { row ->
+                        def sample = [:]
+                        sample.id           = row[0]
+                        return [ sample, row[1] ]
+                }
 //trimmed_reads_ch = Channel.fromFilePairs(TRIMMOMATIC.out.trimmed_reads, checkIfExists: true )
 //adapter_ch = Channel.fromPath( params.adapter, checkIfExists: true )
 
@@ -55,7 +62,7 @@ workflow {
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
-    //gene_prediction = SOMEGENEPREDICTTOOLS( )
+    //prodigal_gene_prediction_ch = PRODIGAL_ANON( refined_dastool_bins_ch.bins, megahit_assembly_ch.megahit_contigs )
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
@@ -78,7 +85,7 @@ process FASTQC_RAW {
     publishDir("${params.outdir}/fastqc_raw", mode: 'copy')
     
     input:
-    tuple val( sample_id ), path( reads )
+    tuple val( sample ), path( reads )
 
     output:
     path( "*_fastqc*" ), emit: raw_reads
@@ -90,10 +97,10 @@ process FASTQC_RAW {
 
     stub:
     """
-    touch ${sample_id}_1_fastqc.html
-    touch ${sample_id}_1_fastqc.gz
-    touch ${sample_id}_2_fastqc.html
-    touch ${sample_id}_2_fastqc.gz
+    touch ${sample.id}_1_fastqc.html
+    touch ${sample.id}_1_fastqc.gz
+    touch ${sample.id}_2_fastqc.html
+    touch ${sample.id}_2_fastqc.gz
     """
 }
 
@@ -106,24 +113,25 @@ process TRIMMOMATIC {
     publishDir("${params.outdir}/trimmed_reads", mode: 'copy')
   
     input:
-    tuple val( sample_id ), path( reads )
+    tuple val( sample ), path( reads )
 
     output:
-    tuple val( sample_id ), path( "*.trimmed.fq.gz" ), emit: trimmed_reads
-    tuple val( sample_id ), path ("*.unpaired.fq.gz"), emit: unpaired
+    tuple val( sample ), path( "*.trimmed.fq.gz" ), emit: trimmed_reads
+    tuple val( sample ), path ("*.unpaired.fq.gz"), emit: unpaired
 
 
     script:
+    def prefix = "${sample.id}"
      """
-     trimmomatic PE -threads 10 -phred33 ${reads} ${sample_id}_1.trimmed.fq.gz ${sample_id}_1.unpaired.fq.gz ${sample_id}_2.trimmed.fq.gz ${sample_id}_2.unpaired.fq.gz ILLUMINACLIP:TrueSeq3-PE.fa:20:30:10:8:TRUE LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+     trimmomatic PE -threads 10 -phred33 ${reads} ${prefix}_1.trimmed.fq.gz ${prefix}_1.unpaired.fq.gz ${prefix}_2.trimmed.fq.gz ${prefix}_2.unpaired.fq.gz ILLUMINACLIP:TrueSeq3-PE.fa:20:30:10:8:TRUE LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
      """
 
     stub:
      """
-     touch ${sample_id}_1.trimmed.fq.gz
-     touch ${sample_id}_2.trimmed.fq.gz
-     touch ${sample_id}_1.unpaired.fq.gz
-     touch ${sample_id}_2.unpaired.fq.gz
+     touch ${sample.id}_1.trimmed.fq.gz
+     touch ${sample.id}_2.trimmed.fq.gz
+     touch ${sample.id}_1.unpaired.fq.gz
+     touch ${sample.id}_2.unpaired.fq.gz
      """
 }
 
@@ -136,7 +144,7 @@ process FASTQC_TRIMMED {
     publishDir("${params.outdir}/fastqc_trimmed", mode: 'copy')
     
     input:
-    tuple val( sample_id ), path( reads_trimmed )
+    tuple val( sample ), path( reads_trimmed )
 
     output:
     path( "*_fastqc*" )
@@ -148,10 +156,10 @@ process FASTQC_TRIMMED {
 
     stub:
     """
-    touch ${sample_id}_1_trimmed_fastqc.html
-    touch ${sample_id}_2_trimmed_fastqc.html
-    touch ${sample_id}_1_trimmed.fastqc.gz
-    touch ${sample_id}_2_trimmed.fastqc.gz
+    touch ${sample.id}_1_trimmed_fastqc.html
+    touch ${sample.id}_2_trimmed_fastqc.html
+    touch ${sample.id}_1_trimmed.fastqc.gz
+    touch ${sample.id}_2_trimmed.fastqc.gz
     """
     
 }
@@ -165,19 +173,20 @@ process MEGAHIT {
     publishDir("${params.outdir}/megahit_out", mode: 'copy')
     
     input:
-    tuple val( sample_id ), path( reads_trimmed )
+    tuple val( sample ), path( reads_trimmed )
 
     output:
-    tuple val( sample_id ), path("megahit_out/*.contigs.fa")                            , emit: megahit_contigs
-    tuple val( sample_id ), path("megahit_out/intermediate_contigs/k*.contigs.fa")      , emit: megahit_k_contigs
-    tuple val( sample_id ), path("megahit_out/intermediate_contigs/k*.addi.fa")         , emit: megahit_addi_contigs
-    tuple val( sample_id ), path("megahit_out/intermediate_contigs/k*.local.fa")        , emit: megahit_local_contigs
-    tuple val( sample_id ), path("megahit_out/intermediate_contigs/k*.final.contigs.fa"), emit: megahit_kfinal_contigs
+    tuple val( sample ), path("megahit_out/*.contigs.fa")                            , emit: megahit_contigs
+    tuple val( sample ), path("megahit_out/intermediate_contigs/k*.contigs.fa")      , emit: megahit_k_contigs
+    tuple val( sample ), path("megahit_out/intermediate_contigs/k*.addi.fa")         , emit: megahit_addi_contigs
+    tuple val( sample ), path("megahit_out/intermediate_contigs/k*.local.fa")        , emit: megahit_local_contigs
+    tuple val( sample ), path("megahit_out/intermediate_contigs/k*.final.contigs.fa"), emit: megahit_kfinal_contigs
 
 
     script:
+    def prefix = "${sample.id}"
     """
-    megahit --presets meta-large -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} -t 8 --out-prefix ${sample_id}
+    megahit --presets meta-large -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} -t 8 --out-prefix ${prefix}
     """
     
     stub:
@@ -201,27 +210,28 @@ process BOWTIE2_INDEX {
     publishDir("${params.outdir}/bowtie2_out", mode: 'copy')
 
     input:
-    tuple val( sample_id ), path( assembly )
+    tuple val( sample ), path( assembly )
 
     output:
-    path ( "${sample_id}_index*.bt2" ), emit: bowtie2_index 
-    
+    path ( "${sample.id}_index*.bt2" ), emit: bowtie2_index 
+
     script:
+    def prefix = "${sample.id}"
     """
-    bowtie2-build ${assembly} ${sample_id}_index
-    touch ${sample_id}_index
+    bowtie2-build ${assembly} ${prefix}_index
+    touch ${prefix}_index
     """
 
     stub:
     """
     mkdir bowtie2_out
-    touch ${sample_id}_index.1.bt2
-    touch ${sample_id}_index.2.bt2
-    touch ${sample_id}_index.3.bt2
-    touch ${sample_id}_index.4.bt2
-    touch ${sample_id}_index.rev.1.bt2
-    touch ${sample_id}_index.rev.2.bt2
-    touch ${sample_id}_index
+    touch ${sample.id}_index.1.bt2
+    touch ${sample.id}_index.2.bt2
+    touch ${sample.id}_index.3.bt2
+    touch ${sample.id}_index.4.bt2
+    touch ${sample.id}_index.rev.1.bt2
+    touch ${sample.id}_index.rev.2.bt2
+    touch ${sample.id}_index
     """
 }
 /* 
@@ -235,29 +245,30 @@ process BOWTIE2_MAP_READS {
 
     input:
     path( index )
-    tuple val( sample_id ), path( reads_trimmed )
+    tuple val( sample ), path( reads_trimmed )
     //val   save_unaligned
     //val   sort_bam
     
     
     output:
-    path( "${sample_id}_sorted.bam" ), emit: aligned_bam
-    path( "${sample_id}_sorted.bam.bai"), emit: aligned_bam_index 
+    path( "${sample.id}_sorted.bam" ), emit: aligned_bam
+    path( "${sample.id}_sorted.bam.bai"), emit: aligned_bam_index 
     //path( "${sample_id}.bowtie2.log" ), emit: align_log
 
     script:
     def idx = index[0].getBaseName(2)
+    def prefix = "${sample.id}"
     """
-    bowtie2 -p 8 -x ${idx} -q -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${sample_id}_sorted.bam 
-    samtools index ${sample_id}_sorted.bam
+    bowtie2 -p 8 -x ${idx} -q -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    samtools index ${sample.id}_sorted.bam
     """
     //required the -h flag to make this work into view/sort commands
     //needed to dealre the correct output in declared output
     stub:
     """
     mkdir mapped
-    touch ${sample_id}_sorted.bam
-    touch ${sample_id}_sorted.bam.bai
+    touch ${sample.id}_sorted.bam
+    touch ${sample.id}_sorted.bam.bai
     """
 }
 /*
@@ -269,8 +280,8 @@ process MAXBIN2_BIN {
     publishDir ("${params.outdir}/MaxBin2", mode: 'copy')
 
     input:
-    tuple val( sample_id ), path( assembly )
-    tuple val( sample_id ), path( reads_trimmed )
+    tuple val( sample ), path( assembly )
+    tuple val( sample ), path( reads_trimmed )
 
     output:
     path( "*.fasta" )   , emit: binned_fastas
@@ -335,7 +346,7 @@ process METABAT2_BIN {
     publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
 
     input:
-    tuple val( sample_id ), path( assembly )
+    tuple val( sample ), path( assembly )
     path( depth )
 
     output:
@@ -368,7 +379,7 @@ process METAQUAST_EVAL {
     publishDir ("${params.outdir}/Metaquast_out", mode: 'copy')
 
     input:
-    tuple val( sample_id ), path( assembly )
+    tuple val( sample ), path( assembly )
 
     output:
     path( "${assembly.simpleName}/*" )                   , emit: quast_qc
@@ -457,7 +468,7 @@ process DASTOOL_BINNING { //can provide link to conda environemnt with yml file.
     input:
     path( maxbin_tsv )
     path( metabat_tsv )
-    tuple val( sample_id ), path( assembly )
+    tuple val( sample ), path( assembly )
 
     output: //updating the output based on DASTool NF module output-this did nothing to change the error-per DASTool githun this is an error with command line syntax
     path("*.log")                                      , emit: log
@@ -509,7 +520,7 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
   libtiff                                  4.6.0-h29866fb_1 --> 4.6.0-h8b53f26_0*/
     tag "DASTOOL_BINNING ${refined_bins}"
     label 'UnO'
-    publishDir ("${params.outdir}", mode: 'copy')
+    publishDir ("${params.outdir}", mode: 'copy') //need to add a way to include naming information for labeling purposes
     
     input:
     path( refined_bins )
@@ -543,6 +554,40 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
     touch CheckM/storage/stub_info.pkl.gz
     mkdir CheckM/storage/aai_qa
     touch CheckM/storage/aai_qa/stub
+    """
+}
+//there should be a step that only proceeds with Prodigal Gene prediction for HQ or MQ bins
+/*
+Predicting genes from refined DASTool Bins with Prodigal
+*/
+process PRODIGAL_ANON{
+    tag "PRODIGAL_ANON ${refined_bins} ${assembly_name}" //prodigal is already in UnO.yml from previous package
+    label 'UnO'
+    publishDir ("${params.outdir}/Prodigal", mode: 'copy')
+
+    input:
+    path( refined_bins )
+    tuple val( sample ), path( assembly )
+    
+    output:
+    path("${sample}.gff.gz"),                 emit: gene_annotations
+    path("${sample}.fna.gz"),                 emit: nucleotide_fasta
+    path("${sample}.faa.gz"),                 emit: amino_acid_fasta
+    path("${sample}_all.txt.gz"),             emit: all_gene_annotations
+    
+    script:
+    def prefix = "${sample.id}"
+    """
+    prodigal \\
+        -p anon \\
+        -f gff \\
+        -d ${prefix}.fna \\
+        -o ${prefix}.gff \\
+        -a ${prefix}.faa" \\
+        -s ${prefix}_all.txt"
+    """
+    stub:
+    """
     """
 }
 
