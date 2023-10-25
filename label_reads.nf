@@ -9,7 +9,8 @@ ch_raw_short_reads = Channel
             .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --single_end on the command line." }
             .map { row ->
                         def sample = [:]
-                        sample.id           = row[0]
+                        sample.id  = row[0]
+                        sample.group = "default"  // Use a string as the default group value
                         return [ sample, row[1] ]
                 }
 ch_short_reads_grouped = ch_raw_short_reads //this would be the trimmed_reads_ch
@@ -17,7 +18,7 @@ ch_short_reads_grouped = ch_raw_short_reads //this would be the trimmed_reads_ch
         .groupTuple(by: 0)
         .map { group, samples, reads ->
             def sample = [:]
-            sample.id = "group-$group"
+            sample.id = "paired-$group"
             sample.group = group
             def reads1 = reads.collect { it[0] }
             def reads2 = reads.collect { it[1] }
@@ -32,10 +33,10 @@ process CHECK_READS{
 
     script:
     """
-    echo ${sample.id}
+    echo ${sample.id} ${sample.group}
     """
 }
-process COLLECT_READS{
+process COLLECT_READS{ //this is meant to represent read grouping and variables used beyond trimmmomatic  
     input:
     tuple val(sample), path(reads1), path(reads2)
     
@@ -45,23 +46,23 @@ process COLLECT_READS{
     script:
     def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
-    echo $input 
+    echo $input $sample.id $sample.group
     """
     //this outputs only the *_1 reads which is what I want 
 }
 process CHECKR1ANDR2{
     input:
-    tuple val(sample), path(reads1), path(reads2)
+    tuple val(sample), path(reads) path(reads2)
     output:
     stdout
     script:
     """
-    echo $reads1 $reads2
+    echo $reads1 $reads2 $sample.id $sample.group
     """
 }
 workflow {
 
         CHECK_READS( ch_raw_short_reads )
         COLLECT_READS(  ch_short_reads_grouped ) //this works to properly format for coassembly 
-        CHECKR1ANDR2( ch_short_reads_grouped )
+        //CHECKR1ANDR2( ch_short_reads_grouped )
 }

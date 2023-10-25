@@ -34,12 +34,30 @@ println """\
             .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --single_end on the command line." }
             .map { row ->
                         def sample = [:]
-                        sample.id           = row[0]
+                        sample.id  = row[0]
+                        sample.group = "default"  // Use a string as the default group value
                         return [ sample, row[1] ]
-                }
+            }
+grouped_reads_ch = reads_ch //this would be the trimmed_reads_ch
+        .map { sample, reads -> [sample.group, sample, reads] }
+        .groupTuple(by: 0)
+        .map { group, samples, reads ->
+            def sample = [:]
+            sample.id = "paired-$group"
+            sample.group = group
+            def reads1 = reads.collect { it[0] }
+            def reads2 = reads.collect { it[1] }
+            [sample, reads1, reads2]
+    }
 //trimmed_reads_ch = Channel.fromFilePairs(TRIMMOMATIC.out.trimmed_reads, checkIfExists: true )
 //adapter_ch = Channel.fromPath( params.adapter, checkIfExists: true )
 
+/*
+========================================================================================
+   Import Modules
+========================================================================================
+*/
+include { MIDAS2 as MIDAS2 } from '.../UnO_nf' //need to incorporate MIDAS2.nf into pipeline 
 /*
 ========================================================================================
    MAIN Workflow
@@ -50,8 +68,18 @@ workflow {
 
     raw_reads_ch = FASTQC_RAW( reads_ch )
     trimmed_reads_ch = TRIMMOMATIC( reads_ch )
+    grouped_reads_ch = TRIMMOMATIC.out.trimmed_reads //this would be the trimmed_reads_ch
+        .map { sample, reads -> [sample.group, sample, reads] }
+        .groupTuple(by: 0)
+        .map { group, samples, reads ->
+            def sample = [:]
+            sample.id = "group-$group"
+            sample.group = group
+            def reads1 = reads.collect { it[0] }
+            def reads2 = reads.collect { it[1] }
+            [sample, reads1, reads2]}
     FASTQC_TRIMMED( trimmed_reads_ch.trimmed_reads )
-    megahit_assembly_ch = MEGAHIT( trimmed_reads_ch.trimmed_reads )
+        megahit_assembly_ch = MEGAHIT( grouped_reads_ch )
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
@@ -121,7 +149,7 @@ process TRIMMOMATIC {
 
 
     script:
-    def prefix = "${sample.id}"
+     def prefix = "${sample.id}"
      """
      trimmomatic PE -threads 10 -phred33 ${reads} ${prefix}_1.trimmed.fq.gz ${prefix}_1.unpaired.fq.gz ${prefix}_2.trimmed.fq.gz ${prefix}_2.unpaired.fq.gz ILLUMINACLIP:TrueSeq3-PE.fa:20:30:10:8:TRUE LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
      """
@@ -133,6 +161,7 @@ process TRIMMOMATIC {
      touch ${sample.id}_1.unpaired.fq.gz
      touch ${sample.id}_2.unpaired.fq.gz
      """
+
 }
 
 /*
@@ -168,12 +197,12 @@ process FASTQC_TRIMMED {
  * Metagenomic co-assembly of reads with megahit.
  */
 process MEGAHIT {
-    tag{"MEGAHIT ${reads_trimmed}"}
+    tag{"MEGAHIT ${reads1} ${reads2}"}
     label 'UnO'
     publishDir("${params.outdir}/megahit_out", mode: 'copy')
     
     input:
-    tuple val( sample ), path( reads_trimmed )
+    tuple val( sample ), path( reads1 ), path( reads2 )
 
     output:
     tuple val( sample ), path("megahit_out/*.contigs.fa")                            , emit: megahit_contigs
@@ -185,8 +214,9 @@ process MEGAHIT {
 
     script:
     def prefix = "${sample.id}"
+    def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
-    megahit --presets meta-large -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} -t 8 --out-prefix ${prefix}
+    megahit --presets meta-large $input -t 8 --out-prefix ${prefix}
     """
     
     stub:

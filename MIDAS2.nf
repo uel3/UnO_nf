@@ -13,7 +13,7 @@ nextflow.enable.dsl=2
 
 params.outdir = 'MIDAS2'
 //params.genome = "${launchDir}/data/ref_genome/ecoli_rel606.fasta"
-params.reads = "$HOME/coal_reads/*_{1,2}.fastq.gz"
+//params.reads = "$HOME/coal_reads/*_{1,2}.fastq.gz" removed reads to get ready for taking in trimmed_reads from QC_Trim_Mega_BT_ST.nf 
 
 println """\
          M I D A S 2- N F   P I P E L I N E
@@ -30,7 +30,7 @@ println """\
 */
 
 //ref_ch = Channel.fromPath( params.genome, checkIfExists: true )  
-reads_ch = Channel.fromFilePairs( params.reads, checkIfExists: true ) 
+//reads_ch = Channel.fromFilePairs( params.reads, checkIfExists: true ) 
 
 /*
 ========================================================================================
@@ -41,9 +41,9 @@ reads_ch = Channel.fromFilePairs( params.reads, checkIfExists: true )
 workflow {
 
     midasdb_uhgg_ch = MIDAS2_DB_BUILD ()
-    midas2_species_ch = MIDAS2_SPECIES_SNPS( reads_ch )
+    midas2_species_ch = MIDAS2_SPECIES_SNPS( reads_trimmed )
     MIDAS2_PARSE( midas2_species_ch.midas2_snps, midasdb_uhgg_ch.db_file )
-    //Enter the rest of the processes for variant calling based on the bash script below
+    //may need to make these seperate--not sure yet
 
 }
 
@@ -83,14 +83,14 @@ process MIDAS2_DB_BUILD {
  */
 process MIDAS2_SPECIES_SNPS {
     //errorStrategy 'ignore'
-    tag{"MIDAS2_SPECIES ${reads}"}
+    tag{"MIDAS2_SPECIES ${reads_trimmed}"}
     label 'midas2'
 
     publishDir("${params.outdir}", mode: 'copy') 
     conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
 
     input:
-    tuple val( sample_id ), path( reads )
+    tuple val( sample ), path( reads )
 
     output:
     path( "midas2_output/${sample_id}/species/log.txt" )
@@ -151,29 +151,30 @@ process MIDAS2_SPECIES_SNPS {
  * MIDAS2 run snps to get narrowed down list of potential species in sample. 
  */
 process MIDAS2_SNPS {
-    tag{"MIDAS2_SNPS ${reads}"}
+    tag{"MIDAS2_SNPS ${reads_trimmed}"}
     label 'midas2'
 
     publishDir("${params.outdir}", mode: 'copy')
     conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
     
     input:
-    tuple val( sample_id ), path( reads )
+    tuple val( sample ), path( reads )
     //path( species_out )
     //path( species_log )
     //path( species_temp )
 
     output:
-    path( "midas2_output/${sample_id}/snps/log.txt" )
-    path( "midas2_output/${sample_id}/snps/snps_summary.tsv"), emit: midas2_snps
-    path( "midas2_output/${sample_id}/snps/*.snps.tsv.lz4" )
-    path( "midas2_output/${sample_id}/bt2_indexes/snps/*" )
+    path( "midas2_output/${sample.id}/snps/log.txt" )
+    path( "midas2_output/${sample.id}/snps/snps_summary.tsv"), emit: midas2_snps
+    path( "midas2_output/${sample.id}/snps/*.snps.tsv.lz4" )
+    path( "midas2_output/${sample.id}/bt2_indexes/snps/*" )
    
    //run_snps isn't working because it requires output from run_species-adding run_snpns to proces MIDAS2_SPECIES gets around this error - also how this is handled in MIDAS nf module 
    script:
+   def prefix = "${sample.id}"
    """
     midas2 run_snps \
-      --sample_name ${sample_id} \
+      --sample_name ${prefix} \
       -1 ${reads[0]} \
       -2 ${reads[1]} \
       --midasdb_name uhgg \
@@ -190,14 +191,14 @@ process MIDAS2_SNPS {
     stub:
     """
     mkdir midas2_output
-    mkdir midas2_output/${sample_id}
-    mkdir midas2_output/${sample_id}/bt2_indexes
-    mkdir midas2_output/${sample_id}/bt2_indexes/snps
-    touch midas2_output/${sample_id}/bt2_indexes/snps/stub
-    mkdir midas2_output/${sample_id}/snps
-    touch midas2_output/${sample_id}/snps/log.txt
-    touch midas2_output/${sample_id}/snps/snps_summary.tsv
-    touch midas2_output/${Sample_id}/snps/stub.snps.tsv.lz4
+    mkdir midas2_output/${sample.id}
+    mkdir midas2_output/${sample.id}/bt2_indexes
+    mkdir midas2_output/${sample.id}/bt2_indexes/snps
+    touch midas2_output/${sample.id}/bt2_indexes/snps/stub
+    mkdir midas2_output/${sample.id}/snps
+    touch midas2_output/${sample.id}/snps/log.txt
+    touch midas2_output/${sample.id}/snps/snps_summary.tsv
+    touch midas2_output/${Sample.id}/snps/stub.snps.tsv.lz4
     """
 }
 /*
@@ -222,8 +223,8 @@ process MIDAS2_PARSE {
     
     stub:
     """
-    mkdir midas2_ouptut/${sample_id}
-    mkdir midas2_ouptut/${sample_id}/midas2_species_ID.txt
+    mkdir midas2_ouptut/${sample.id}
+    mkdir midas2_ouptut/${sample.id}/midas2_species_ID.txt
     """
 }
 /*
