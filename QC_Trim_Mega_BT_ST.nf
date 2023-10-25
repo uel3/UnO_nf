@@ -67,6 +67,7 @@ include { MIDAS2 as MIDAS2 } from '.../UnO_nf' //need to incorporate MIDAS2.nf i
 workflow {
 
     raw_reads_ch = FASTQC_RAW( reads_ch )
+    //checkpoint
     trimmed_reads_ch = TRIMMOMATIC( reads_ch )
     grouped_reads_ch = TRIMMOMATIC.out.trimmed_reads //this would be the trimmed_reads_ch
         .map { sample, reads -> [sample.group, sample, reads] }
@@ -80,6 +81,7 @@ workflow {
             [sample, reads1, reads2]}
     FASTQC_TRIMMED( trimmed_reads_ch.trimmed_reads )
         megahit_assembly_ch = MEGAHIT( grouped_reads_ch )
+    //checkpoint
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
@@ -87,14 +89,15 @@ workflow {
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
     metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
     metaquast_ch = METAQUAST_EVAL ( megahit_assembly_ch.megahit_contigs )
+    //checkpoint
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
+    //checkpoint
     //prodigal_gene_prediction_ch = PRODIGAL_ANON( refined_dastool_bins_ch.bins, megahit_assembly_ch.megahit_contigs )
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
-    // Enter the rest of the processes for variant calling based on the bash script below
 
 }
 
