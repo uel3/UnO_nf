@@ -57,7 +57,7 @@ grouped_reads_ch = reads_ch //this would be the trimmed_reads_ch
    Import Modules
 ========================================================================================
 */
-include { MIDAS2 as MIDAS2 } from '.../UnO_nf' //need to incorporate MIDAS2.nf into pipeline 
+//include { MIDAS2 as MIDAS2 } from '.../UnO_nf' //need to incorporate MIDAS2.nf into pipeline 
 /*
 ========================================================================================
    MAIN Workflow
@@ -94,7 +94,7 @@ workflow {
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
     //checkpoint
-    //prodigal_gene_prediction_ch = PRODIGAL_ANON( refined_dastool_bins_ch.bins, megahit_assembly_ch.megahit_contigs )
+    prodigal_gene_prediction_ch = PRODIGAL_ANON( refined_dastool_bins_ch.bins, megahit_assembly_ch.megahit_contigs )
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
@@ -603,16 +603,16 @@ process PRODIGAL_ANON{
     tuple val( sample ), path( assembly )
     
     output:
-    path("${sample}.gff.gz"),                 emit: gene_annotations
-    path("${sample}.fna.gz"),                 emit: nucleotide_fasta
-    path("${sample}.faa.gz"),                 emit: amino_acid_fasta
-    path("${sample}_all.txt.gz"),             emit: all_gene_annotations
+    path("${sample.id}.gff"),                 emit: gene_annotations
+    path("${sample.id}.fna"),                 emit: nucleotide_fasta
+    path("${sample.id}.faa"),                 emit: amino_acid_fasta
+    path("${sample.id}_all.txt"),             emit: all_gene_annotations
     
     script:
-    def prefix = "${sample.id}"
+    def prefix = "${sample.id}" //need to find a way to process each bin file seperatlet 
     """
     prodigal \\
-        -p anon \\
+        -i ${refined_bins[0]}, ${refined_bins[1]} \\ 
         -f gff \\
         -d ${prefix}.fna \\
         -o ${prefix}.gff \\
