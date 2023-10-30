@@ -35,20 +35,10 @@ println """\
             .map { row ->
                         def sample = [:]
                         sample.id  = row[0]
-                        sample.group = "default"  // Use a string as the default group value
+                        sample.group = row[0]  // Use a string as the default group value
                         return [ sample, row[1] ]
-            }
-grouped_reads_ch = reads_ch //this would be the trimmed_reads_ch
-        .map { sample, reads -> [sample.group, sample, reads] }
-        .groupTuple(by: 0)
-        .map { group, samples, reads ->
-            def sample = [:]
-            sample.id = "paired-$group"
-            sample.group = group
-            def reads1 = reads.collect { it[0] }
-            def reads2 = reads.collect { it[1] }
-            [sample, reads1, reads2]
-    }
+                }
+
 //trimmed_reads_ch = Channel.fromFilePairs(TRIMMOMATIC.out.trimmed_reads, checkIfExists: true )
 //adapter_ch = Channel.fromPath( params.adapter, checkIfExists: true )
 
@@ -73,14 +63,15 @@ workflow {
         .map { sample, reads -> [sample.group, sample, reads] }
         .groupTuple(by: 0)
         .map { group, samples, reads ->
-            def sample = [:]
-            sample.id = "group-$group"
-            sample.group = group
+            def groupedSample = [:]
+            groupedSample.id = group //with this sample.id for reads in ch_short_reads_grouped is the SRRnum
+            groupedSample.group = "paired" //with this the sample.group for reads in ch_short_reads_grouped is "paired" -I can call this?
             def reads1 = reads.collect { it[0] }
             def reads2 = reads.collect { it[1] }
-            [sample, reads1, reads2]}
+            [groupedSample, reads1, reads2]
+    }
     FASTQC_TRIMMED( trimmed_reads_ch.trimmed_reads )
-        megahit_assembly_ch = MEGAHIT( grouped_reads_ch )
+    megahit_assembly_ch = MEGAHIT( grouped_reads_ch )
     //checkpoint
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
@@ -94,7 +85,8 @@ workflow {
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
     //checkpoint
-    prodigal_gene_prediction_ch = PRODIGAL_ANON( refined_dastool_bins_ch.bins, megahit_assembly_ch.megahit_contigs )
+    flatten_refined_dastool_bins_ch = DASTOOL_BINNING.out.bins.flatten() //this flattens the channel so each bin file can be seperately processed by prodigal 
+    prodigal_gene_prediction_ch = PRODIGAL_ANON( flatten_refined_dastool_bins_ch )
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
@@ -216,7 +208,7 @@ process MEGAHIT {
 
 
     script:
-    def prefix = "${sample.id}"
+    def prefix = "${sample.group}"
     def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
     megahit --presets meta-large $input -t 8 --out-prefix ${prefix}
@@ -246,10 +238,10 @@ process BOWTIE2_INDEX {
     tuple val( sample ), path( assembly )
 
     output:
-    path ( "${sample.id}_index*.bt2" ), emit: bowtie2_index 
+    path ( "${sample.group}_index*.bt2" ), emit: bowtie2_index 
 
     script:
-    def prefix = "${sample.id}"
+    def prefix = "${sample.group}"
     """
     bowtie2-build ${assembly} ${prefix}_index
     touch ${prefix}_index
@@ -258,13 +250,13 @@ process BOWTIE2_INDEX {
     stub:
     """
     mkdir bowtie2_out
-    touch ${sample.id}_index.1.bt2
-    touch ${sample.id}_index.2.bt2
-    touch ${sample.id}_index.3.bt2
-    touch ${sample.id}_index.4.bt2
-    touch ${sample.id}_index.rev.1.bt2
-    touch ${sample.id}_index.rev.2.bt2
-    touch ${sample.id}_index
+    touch ${sample.group}_index.1.bt2
+    touch ${sample.group}_index.2.bt2
+    touch ${sample.group}_index.3.bt2
+    touch ${sample.group}_index.4.bt2
+    touch ${sample.group}_index.rev.1.bt2
+    touch ${sample.group}_index.rev.2.bt2
+    touch ${sample.group}_index
     """
 }
 /* 
@@ -278,7 +270,7 @@ process BOWTIE2_MAP_READS {
 
     input:
     path( index )
-    tuple val( sample ), path( reads_trimmed )
+    tuple val( sample ), path( reads_trimmed ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
     //val   save_unaligned
     //val   sort_bam
     
@@ -291,6 +283,7 @@ process BOWTIE2_MAP_READS {
     script:
     def idx = index[0].getBaseName(2)
     def prefix = "${sample.id}"
+    //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
     """
     bowtie2 -p 8 -x ${idx} -q -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
     samtools index ${sample.id}_sorted.bam
@@ -325,10 +318,10 @@ process MAXBIN2_BIN {
     path( "*.tooshort" ), emit: tooshort_fasta
     path( "*.abund*" )  , emit: abundance, optional: true
     path( "*_bin.tar.gz" ) , emit: marker_bins , optional: true
-        
+    ///smae thing below for multiple sets of reads     
     script:
     """
-    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2 -reads ${reads_trimmed[0]} -reads2 ${reads_trimmed[1]} 
+    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -reads ${reads_trimmed[0]} -reads2 ${reads_trimmed[1]} 
     """
     //getting an inital error of run_MaxBin.pl: command not found-looking into it-mamba install maxbin2 
     //mag has additonal code to zip the fasta bins--might consider to cut down on space
@@ -594,36 +587,33 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
 Predicting genes from refined DASTool Bins with Prodigal
 */
 process PRODIGAL_ANON{
-    tag "PRODIGAL_ANON ${refined_bins} ${assembly_name}" //prodigal is already in UnO.yml from previous package
+    tag "PRODIGAL_ANON ${refined_bins}" //prodigal is already in UnO.yml from previous package
     label 'UnO'
     publishDir ("${params.outdir}/Prodigal", mode: 'copy')
 
     input:
     path( refined_bins )
-    tuple val( sample ), path( assembly )
     
     output:
-    path("${sample.id}.gff"),                 emit: gene_annotations
-    path("${sample.id}.fna"),                 emit: nucleotide_fasta
-    path("${sample.id}.faa"),                 emit: amino_acid_fasta
-    path("${sample.id}_all.txt"),             emit: all_gene_annotations
+    path("${refined_bins.baseName}.gff"),                 emit: gene_annotations
+    path("${refined_bins.baseName}.fna"),                 emit: nucleotide_fasta
+    path("${refined_bins.baseName}.faa"),                 emit: amino_acid_fasta
+    path("${refined_bins.baseName}_all.txt"),             emit: all_gene_annotations
     
     script:
-    def prefix = "${sample.id}" //need to find a way to process each bin file seperatlet 
     """
     prodigal \\
-        -i ${refined_bins[0]}, ${refined_bins[1]} \\ 
+        -i $refined_bins \\
         -f gff \\
-        -d ${prefix}.fna \\
-        -o ${prefix}.gff \\
-        -a ${prefix}.faa" \\
-        -s ${prefix}_all.txt"
+        -d ${refined_bins.baseName}.fna \\
+        -o ${refined_bins.baseName}.gff \\
+        -a ${refined_bins.baseName}.faa \\
+        -s ${refined_bins.baseName}_all.txt
     """
     stub:
     """
     """
 }
-
 /*
 ========================================================================================
    Workflow Event Handler
