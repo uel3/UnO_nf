@@ -15,7 +15,7 @@ nextflow.enable.dsl=2
 // Pipeline Input parameters
 
 params.outdir = 'results_multi'
-params.reads = "$HOME/coal_reads/zipped/*_{1,2}.fastq.gz"
+params.reads = "$HOME/coal_reads/subset_3/*_{1,2}.fastq.gz" //using a subet of 3 reads to test multiple reads on the pipeline-10 sets was too much 
 
 println """\
          U n O - N F   P I P E L I N E
@@ -93,7 +93,8 @@ workflow {
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
-
+    //index_refined_bins_ch = BOWTIE2_INDEX_BINS( refined_dastool_bins_ch.bins )
+    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS(index_refined_bins_ch.index, trimmed_reads_ch.trimmed_reads )
 }
 
 /*
@@ -615,6 +616,43 @@ process PRODIGAL_ANON{
     """
     stub:
     """
+    """
+}
+/*
+Creating and Bowtie2 index of refined DASTool bins to map trimmmed to
+*/
+process BOWTIE2_INDEX_BINS{
+    tag "BOWTIE2_INDEX_BINS ${refined_bins}"
+    label 'UnO'
+    publishDir ("${params.oudir}/bowtie2_out/indexed_bins", mode: 'copy')
+
+    input:
+    path( refined_bins )
+
+    output:
+    input:
+    tuple val( sample ), path( assembly )
+
+    output:
+    path ( "${sample.group}_index*.bt2" ), emit: bowtie2_index 
+
+    script:
+    def prefix = "${sample.group}"
+    """
+    bowtie2-build ${assembly} ${prefix}_index
+    touch ${prefix}_index
+    """
+
+    stub:
+    """
+    mkdir bowtie2_out
+    touch ${sample.group}_index.1.bt2
+    touch ${sample.group}_index.2.bt2
+    touch ${sample.group}_index.3.bt2
+    touch ${sample.group}_index.4.bt2
+    touch ${sample.group}_index.rev.1.bt2
+    touch ${sample.group}_index.rev.2.bt2
+    touch ${sample.group}_index
     """
 }
 /*
