@@ -29,3 +29,8 @@ MIDAS2_sing/
 singulairty_wf.txt
 checkm_qa.tsv
 test_collect.nf
+/results_multi/
+/results_multi_first_attempt/
+megahit_coass_test.e13109621
+megahit_coass_test.o13109621
+megahit_resoruces.sh

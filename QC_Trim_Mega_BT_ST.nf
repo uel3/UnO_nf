@@ -3,7 +3,10 @@
    UnO Nextflow Workflow
 ========================================================================================
    Github   : 
-   Contact  :     
+   Contact  :
+   Commands to run: 
+   $module load nextflow 
+   $nextflow run QC_Trim_Mega_BT_ST.nf -profile conda, sge
 ----------------------------------------------------------------------------------------
 */
 
@@ -11,8 +14,8 @@ nextflow.enable.dsl=2
 
 // Pipeline Input parameters
 
-params.outdir = 'results'
-params.reads = "$HOME/coal_reads/*_{1,2}.fastq.gz"
+params.outdir = 'results_multi'
+params.reads = "$HOME/coal_reads/zipped/*_{1,2}.fastq.gz"
 
 println """\
          U n O - N F   P I P E L I N E
@@ -35,7 +38,7 @@ println """\
             .map { row ->
                         def sample = [:]
                         sample.id  = row[0]
-                        sample.group = row[0]  // Use a string as the default group value
+                        sample.group = "reads"  // Ussing 0 for thr group to reflect nf-mag structure 
                         return [ sample, row[1] ]
                 }
 
@@ -64,8 +67,8 @@ workflow {
         .groupTuple(by: 0)
         .map { group, samples, reads ->
             def groupedSample = [:]
-            groupedSample.id = group //with this sample.id for reads in ch_short_reads_grouped is the SRRnum
-            groupedSample.group = "paired" //with this the sample.group for reads in ch_short_reads_grouped is "paired" -I can call this?
+            groupedSample.id = "grouped_$group" //with this sample.id for reads in ch_short_reads_grouped is the "paired_reads"
+            groupedSample.group = group //with this the sample.group for reads in ch_short_reads_grouped is "reads" -I can call this?
             def reads1 = reads.collect { it[0] }
             def reads2 = reads.collect { it[1] }
             [groupedSample, reads1, reads2]
@@ -74,7 +77,7 @@ workflow {
     megahit_assembly_ch = MEGAHIT( grouped_reads_ch )
     //checkpoint
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
-    bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
+    bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, trimmed_reads_ch.trimmed_reads )
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
