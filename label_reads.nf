@@ -46,7 +46,7 @@ process COLLECT_READS{ //this is meant to represent read grouping and variables 
     script:
     def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
-    echo 'this is from COLLECT_READ' $input $sample.id
+    echo 'this is from COLLECT_READ' $input $sample.id ${reads1[0]}
     """
     //this outputs only the *_1 reads which is what I want 
     //reads1.baseName prints SRR_1_paired.fq

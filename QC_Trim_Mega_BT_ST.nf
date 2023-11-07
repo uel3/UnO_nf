@@ -78,7 +78,7 @@ workflow {
     //checkpoint
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
-    mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
+    mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, grouped_reads_ch )
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, trimmed_reads_ch.trimmed_reads )
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
     metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
@@ -218,7 +218,8 @@ process MEGAHIT {
     megahit --presets meta-large $input -t 8 --out-prefix ${prefix}
     """
     
-    stub:
+    stu
+    b:
     """
     mkdir megahit_out
     touch megahit_out/stub.contigs.fa
@@ -274,7 +275,7 @@ process BOWTIE2_MAP_READS {
 
     input:
     path( index )
-    tuple val( sample ), path( reads_trimmed ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
+    tuple val( sample ), path( reads1 ), path( reads2 ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
     //val   save_unaligned
     //val   sort_bam
     
@@ -289,11 +290,12 @@ process BOWTIE2_MAP_READS {
     def prefix = "${sample.id}"
     //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
     """
-    bowtie2 -p 8 -x ${idx} -q -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    bowtie2 -p 8 -x ${idx} -q -1 ${reads1} -2 ${reads2} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
     samtools index ${sample.id}_sorted.bam
     """
     //required the -h flag to make this work into view/sort commands
     //needed to dealre the correct output in declared output
+    // will need this to accomodate multiple reads 
     stub:
     """
     mkdir mapped
