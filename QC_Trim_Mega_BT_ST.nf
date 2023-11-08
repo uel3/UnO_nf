@@ -15,7 +15,8 @@ nextflow.enable.dsl=2
 // Pipeline Input parameters
 
 params.outdir = 'results_multi'
-params.reads = "$HOME/coal_reads/subset_3/*_{1,2}.fastq.gz" //using a subet of 3 reads to test multiple reads on the pipeline-10 sets was too much 
+//params.reads = "$HOME/coal_reads/subset_3/*_{1,2}.fastq.gz" //using a subet of 3 reads to test multiple reads on the pipeline-10 sets was too much 
+params.reads = "$HOME/coal_reads/small_3/*_{1,2}.fastq.gz" //smaller fastqs for faster test runs 
 
 println """\
          U n O - N F   P I P E L I N E
@@ -42,7 +43,6 @@ println """\
                         return [ sample, row[1] ]
                 }
 
-//trimmed_reads_ch = Channel.fromFilePairs(TRIMMOMATIC.out.trimmed_reads, checkIfExists: true )
 //adapter_ch = Channel.fromPath( params.adapter, checkIfExists: true )
 
 /*
@@ -79,7 +79,12 @@ workflow {
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, grouped_reads_ch )
-    max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, trimmed_reads_ch.trimmed_reads )
+    text_file_ch = ch_short_reads_grouped
+    .map { sample, reads1, reads2 -> 
+    "${reads1},${reads2}" 
+    }
+    .collectFile(name: 'grouped_reads.txt')
+    max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, text_file_ch )
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
     metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
     metaquast_ch = METAQUAST_EVAL ( megahit_assembly_ch.megahit_contigs )
@@ -218,8 +223,7 @@ process MEGAHIT {
     megahit --presets meta-large $input -t 8 --out-prefix ${prefix}
     """
     
-    stu
-    b:
+    stub:
     """
     mkdir megahit_out
     touch megahit_out/stub.contigs.fa
@@ -268,7 +272,7 @@ process BOWTIE2_INDEX {
 * Mapping reads to bowtie2 index to evaluate coverage and for downstreaming binning tools.
 */
 process BOWTIE2_MAP_READS {
-    tag "BOWTIE2_MAP_READS ${index} ${reads_trimmed}" //"$assembler-$name"
+    tag "BOWTIE2_MAP_READS ${index} ${reads1} ${reads2}" //"$assembler-$name"
     label 'UnO'
     publishDir ("${params.outdir}/bowtie2_out/mapped", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
         //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
@@ -313,7 +317,7 @@ process MAXBIN2_BIN {
 
     input:
     tuple val( sample ), path( assembly )
-    tuple val( sample ), path( reads_trimmed )
+    file(readstext) //updating this for new read grouping -might have to provide an abundance file and create the process to do so 
 
     output:
     path( "*.fasta" )   , emit: binned_fastas
@@ -327,7 +331,7 @@ process MAXBIN2_BIN {
     ///smae thing below for multiple sets of reads     
     script:
     """
-    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -reads ${reads_trimmed[0]} -reads2 ${reads_trimmed[1]} 
+    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -readslist ${readstext}
     """
     //getting an inital error of run_MaxBin.pl: command not found-looking into it-mamba install maxbin2 
     //mag has additonal code to zip the fasta bins--might consider to cut down on space

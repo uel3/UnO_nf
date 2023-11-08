@@ -24,6 +24,7 @@ ch_short_reads_grouped = ch_raw_short_reads //this would be the trimmed_reads_ch
             def reads2 = reads.collect { it[1] }
             [groupedSample, reads1, reads2]
     }
+
 process CHECK_READS{
     input:
     tuple val(sample), path( all_reads )
@@ -64,9 +65,21 @@ process CHECKR1ANDR2{
     echo 'this is from CHECHR2..' ${read[1]}
     """
 }
+process CHECKTXT{
+    input:
+    file(grouptxt)
+    output:
+    stdout:
+    script:
+    """
+    echo 'this is from checktxt' $grouptxt
+    cat $grouptxt
+    """
+}
 workflow {
 
         CHECK_READS( ch_raw_short_reads )
         COLLECT_READS(  ch_short_reads_grouped ) 
         CHECKR1ANDR2( ch_raw_short_reads )
+        CHECKTXT( text_file_ch )
 }
