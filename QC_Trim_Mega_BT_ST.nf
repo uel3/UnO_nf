@@ -81,7 +81,7 @@ workflow {
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, grouped_reads_ch )
     text_file_ch = grouped_reads_ch
     .map { sample, reads1, reads2 -> 
-    "${reads1},${reads2}" 
+    reads1.join("\n") + "\n" + reads2.join("\n") 
     }
     .collectFile(name: 'grouped_reads.txt')
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, text_file_ch )
@@ -311,7 +311,7 @@ process BOWTIE2_MAP_READS {
  * MaxBin2 binning of assembled contigs
  */
 process MAXBIN2_BIN {
-    tag "MAXBIN2_BIN ${assembly}"
+    tag "MAXBIN2_BIN ${assembly} ${readstext}"
     label 'UnO'
     publishDir ("${params.outdir}/MaxBin2", mode: 'copy')
 
@@ -331,7 +331,7 @@ process MAXBIN2_BIN {
     ///smae thing below for multiple sets of reads     
     script:
     """
-    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -readslist ${readstext}
+    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -reads_list ${readstext}
     """
     //getting an inital error of run_MaxBin.pl: command not found-looking into it-mamba install maxbin2 
     //mag has additonal code to zip the fasta bins--might consider to cut down on space

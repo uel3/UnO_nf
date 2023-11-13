@@ -1,7 +1,8 @@
 nextflow.enable.dsl=2
 
 // Pipeline Input parameters
-
+/* run this script: nextflow run label_reads.nf -process.echo
+*/
 params.reads = "$HOME/coal_reads/*{1,2}_paired.fq.gz" //this allows me to assign the meta.id to all reads in the params.reads directory-this will be helpful 
 
 ch_raw_short_reads = Channel
@@ -26,7 +27,7 @@ ch_short_reads_grouped = ch_raw_short_reads //this would be the trimmed_reads_ch
     }
 text_file_ch = ch_short_reads_grouped
     .map { sample, reads1, reads2 -> 
-    "${reads1},${reads2}" 
+    reads1.join("\n") + "\n" + reads2.join("\n") 
     }
     .collectFile(name: 'grouped_reads.txt')
 
