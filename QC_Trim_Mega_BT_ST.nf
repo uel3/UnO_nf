@@ -79,7 +79,7 @@ workflow {
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, grouped_reads_ch )
-    text_file_ch = ch_short_reads_grouped
+    text_file_ch = grouped_reads_ch
     .map { sample, reads1, reads2 -> 
     "${reads1},${reads2}" 
     }

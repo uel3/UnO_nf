@@ -24,6 +24,11 @@ ch_short_reads_grouped = ch_raw_short_reads //this would be the trimmed_reads_ch
             def reads2 = reads.collect { it[1] }
             [groupedSample, reads1, reads2]
     }
+text_file_ch = ch_short_reads_grouped
+    .map { sample, reads1, reads2 -> 
+    "${reads1},${reads2}" 
+    }
+    .collectFile(name: 'grouped_reads.txt')
 
 process CHECK_READS{
     input:
