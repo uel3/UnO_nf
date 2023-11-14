@@ -1,7 +1,8 @@
 nextflow.enable.dsl=2
 
 // Pipeline Input parameters
-
+/* run this script: nextflow run label_reads.nf -process.echo
+*/
 params.reads = "$HOME/coal_reads/*{1,2}_paired.fq.gz" //this allows me to assign the meta.id to all reads in the params.reads directory-this will be helpful 
 
 ch_raw_short_reads = Channel
@@ -10,7 +11,7 @@ ch_raw_short_reads = Channel
             .map { row ->
                         def sample = [:]
                         sample.id  = row[0]
-                        sample.group = row[0]  // Use a string as the default group value
+                        sample.group = "reads"  // Use a string as the default group value
                         return [ sample, row[1] ]
                 }
 ch_short_reads_grouped = ch_raw_short_reads //this would be the trimmed_reads_ch
@@ -18,12 +19,18 @@ ch_short_reads_grouped = ch_raw_short_reads //this would be the trimmed_reads_ch
         .groupTuple(by: 0)
         .map { group, samples, reads ->
             def groupedSample = [:]
-            groupedSample.id = group //with this sample.id for reads in ch_short_reads_grouped is the SRRnum
-            groupedSample.group = "paired" //with this the sample.group for reads in ch_short_reads_grouped is "parired" -I can call this?
+            groupedSample.id = "grouped_$group" //with this sample.id for reads in ch_short_reads_grouped is the SRRnum
+            groupedSample.group = group //with this the sample.group for reads in ch_short_reads_grouped is "parired" -I can call this?
             def reads1 = reads.collect { it[0] }
             def reads2 = reads.collect { it[1] }
             [groupedSample, reads1, reads2]
     }
+text_file_ch = ch_short_reads_grouped
+    .map { sample, reads1, reads2 -> 
+    reads1.join("\n") + "\n" + reads2.join("\n") 
+    }
+    .collectFile(name: 'grouped_reads.txt')
+
 process CHECK_READS{
     input:
     tuple val(sample), path( all_reads )
@@ -46,7 +53,7 @@ process COLLECT_READS{ //this is meant to represent read grouping and variables 
     script:
     def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
-    echo 'this is from COLLECT_READ' $sample.id $sample.group
+    echo 'this is from COLLECT_READ' $input $sample.id ${reads1[0]}
     """
     //this outputs only the *_1 reads which is what I want 
     //reads1.baseName prints SRR_1_paired.fq
@@ -64,9 +71,21 @@ process CHECKR1ANDR2{
     echo 'this is from CHECHR2..' ${read[1]}
     """
 }
+process CHECKTXT{
+    input:
+    file(grouptxt)
+    output:
+    stdout:
+    script:
+    """
+    echo 'this is from checktxt' $grouptxt
+    cat $grouptxt
+    """
+}
 workflow {
 
         CHECK_READS( ch_raw_short_reads )
-        COLLECT_READS(  ch_short_reads_grouped ) //this works to properly format for coassembly 
+        COLLECT_READS(  ch_short_reads_grouped ) 
         CHECKR1ANDR2( ch_raw_short_reads )
+        CHECKTXT( text_file_ch )
 }

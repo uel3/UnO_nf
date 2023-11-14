@@ -3,7 +3,10 @@
    UnO Nextflow Workflow
 ========================================================================================
    Github   : 
-   Contact  :     
+   Contact  :
+   Commands to run: 
+   $module load nextflow 
+   $nextflow run QC_Trim_Mega_BT_ST.nf -profile conda, sge
 ----------------------------------------------------------------------------------------
 */
 
@@ -11,8 +14,9 @@ nextflow.enable.dsl=2
 
 // Pipeline Input parameters
 
-params.outdir = 'results'
-params.reads = "$HOME/coal_reads/*_{1,2}.fastq.gz"
+params.outdir = 'results_multi'
+//params.reads = "$HOME/coal_reads/subset_3/*_{1,2}.fastq.gz" //using a subet of 3 reads to test multiple reads on the pipeline-10 sets was too much 
+params.reads = "$HOME/coal_reads/small_3/*_{1,2}.fastq.gz" //smaller fastqs for faster test runs 
 
 println """\
          U n O - N F   P I P E L I N E
@@ -35,11 +39,10 @@ println """\
             .map { row ->
                         def sample = [:]
                         sample.id  = row[0]
-                        sample.group = row[0]  // Use a string as the default group value
+                        sample.group = "reads"  // Ussing 0 for thr group to reflect nf-mag structure 
                         return [ sample, row[1] ]
                 }
 
-//trimmed_reads_ch = Channel.fromFilePairs(TRIMMOMATIC.out.trimmed_reads, checkIfExists: true )
 //adapter_ch = Channel.fromPath( params.adapter, checkIfExists: true )
 
 /*
@@ -64,8 +67,8 @@ workflow {
         .groupTuple(by: 0)
         .map { group, samples, reads ->
             def groupedSample = [:]
-            groupedSample.id = group //with this sample.id for reads in ch_short_reads_grouped is the SRRnum
-            groupedSample.group = "paired" //with this the sample.group for reads in ch_short_reads_grouped is "paired" -I can call this?
+            groupedSample.id = "grouped_$group" //with this sample.id for reads in ch_short_reads_grouped is the "paired_reads"
+            groupedSample.group = group //with this the sample.group for reads in ch_short_reads_grouped is "reads" -I can call this?
             def reads1 = reads.collect { it[0] }
             def reads2 = reads.collect { it[1] }
             [groupedSample, reads1, reads2]
@@ -74,9 +77,14 @@ workflow {
     megahit_assembly_ch = MEGAHIT( grouped_reads_ch )
     //checkpoint
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
-    bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs ) // https://www.nextflow.io/docs/latest/process.html#understand-how-multiple-input-channels-work
-    mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, trimmed_reads_ch.trimmed_reads )
-    max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, trimmed_reads_ch.trimmed_reads )
+    bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
+    mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, grouped_reads_ch )
+    text_file_ch = grouped_reads_ch
+        .map { sample, reads1, reads2 -> 
+        reads1.join("\n") + "\n" + reads2.join("\n") 
+        }
+        .collectFile(name: 'grouped_reads.txt')
+    max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, text_file_ch )
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
     metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
     metaquast_ch = METAQUAST_EVAL ( megahit_assembly_ch.megahit_contigs )
@@ -90,7 +98,8 @@ workflow {
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
-
+    //index_refined_bins_ch = BOWTIE2_INDEX_BINS( refined_dastool_bins_ch.bins )
+    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS(index_refined_bins_ch.index, trimmed_reads_ch.trimmed_reads )
 }
 
 /*
@@ -263,14 +272,14 @@ process BOWTIE2_INDEX {
 * Mapping reads to bowtie2 index to evaluate coverage and for downstreaming binning tools.
 */
 process BOWTIE2_MAP_READS {
-    tag "BOWTIE2_MAP_READS ${index} ${reads_trimmed}" //"$assembler-$name"
+    tag "BOWTIE2_MAP_READS ${index} ${reads1} ${reads2}" //"$assembler-$name"
     label 'UnO'
     publishDir ("${params.outdir}/bowtie2_out/mapped", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
         //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
 
     input:
     path( index )
-    tuple val( sample ), path( reads_trimmed ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
+    tuple val( sample ), path( reads1 ), path( reads2 ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
     //val   save_unaligned
     //val   sort_bam
     
@@ -285,11 +294,12 @@ process BOWTIE2_MAP_READS {
     def prefix = "${sample.id}"
     //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
     """
-    bowtie2 -p 8 -x ${idx} -q -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    bowtie2 -p 8 -x ${idx} -q -1 ${reads1} -2 ${reads2} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
     samtools index ${sample.id}_sorted.bam
     """
     //required the -h flag to make this work into view/sort commands
     //needed to dealre the correct output in declared output
+    // will need this to accomodate multiple reads 
     stub:
     """
     mkdir mapped
@@ -301,13 +311,13 @@ process BOWTIE2_MAP_READS {
  * MaxBin2 binning of assembled contigs
  */
 process MAXBIN2_BIN {
-    tag "MAXBIN2_BIN ${assembly}"
+    tag "MAXBIN2_BIN ${assembly} ${readstext}"
     label 'UnO'
     publishDir ("${params.outdir}/MaxBin2", mode: 'copy')
 
     input:
     tuple val( sample ), path( assembly )
-    tuple val( sample ), path( reads_trimmed )
+    file(readstext) //updating this for new read grouping -might have to provide an abundance file and create the process to do so 
 
     output:
     path( "*.fasta" )   , emit: binned_fastas
@@ -321,7 +331,7 @@ process MAXBIN2_BIN {
     ///smae thing below for multiple sets of reads     
     script:
     """
-    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -reads ${reads_trimmed[0]} -reads2 ${reads_trimmed[1]} 
+    run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -reads_list ${readstext}
     """
     //getting an inital error of run_MaxBin.pl: command not found-looking into it-mamba install maxbin2 
     //mag has additonal code to zip the fasta bins--might consider to cut down on space
@@ -612,6 +622,43 @@ process PRODIGAL_ANON{
     """
     stub:
     """
+    """
+}
+/*
+Creating and Bowtie2 index of refined DASTool bins to map trimmmed to
+*/
+process BOWTIE2_INDEX_BINS{
+    tag "BOWTIE2_INDEX_BINS ${refined_bins}"
+    label 'UnO'
+    publishDir ("${params.oudir}/bowtie2_out/indexed_bins", mode: 'copy')
+
+    input:
+    path( refined_bins )
+
+    output:
+    input:
+    tuple val( sample ), path( assembly )
+
+    output:
+    path ( "${sample.group}_index*.bt2" ), emit: bowtie2_index 
+
+    script:
+    def prefix = "${sample.group}"
+    """
+    bowtie2-build ${assembly} ${prefix}_index
+    touch ${prefix}_index
+    """
+
+    stub:
+    """
+    mkdir bowtie2_out
+    touch ${sample.group}_index.1.bt2
+    touch ${sample.group}_index.2.bt2
+    touch ${sample.group}_index.3.bt2
+    touch ${sample.group}_index.4.bt2
+    touch ${sample.group}_index.rev.1.bt2
+    touch ${sample.group}_index.rev.2.bt2
+    touch ${sample.group}_index
     """
 }
 /*
