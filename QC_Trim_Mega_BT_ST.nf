@@ -80,10 +80,10 @@ workflow {
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
     mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, grouped_reads_ch )
     text_file_ch = grouped_reads_ch
-    .map { sample, reads1, reads2 -> 
-    reads1.join("\n") + "\n" + reads2.join("\n") 
-    }
-    .collectFile(name: 'grouped_reads.txt')
+        .map { sample, reads1, reads2 -> 
+        reads1.join("\n") + "\n" + reads2.join("\n") 
+        }
+        .collectFile(name: 'grouped_reads.txt')
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, text_file_ch )
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
     metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
