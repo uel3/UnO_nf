@@ -27,3 +27,5 @@ test_collect.nf
 /results_multiple_reads_finished/
 megahit_resoruces.sh
 UnO_HPC.sh
+/results_multi_JGIdepths_wrong/
+/results_multi/
