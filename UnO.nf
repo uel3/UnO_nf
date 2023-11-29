@@ -5,8 +5,8 @@
    Github   : 
    Contact  :
    Commands to run: 
-   $module load nextflow 
-   $nextflow run QC_Trim_Mega_BT_ST.nf -profile conda, sge
+   $module load nextflow/22.10.6.5843
+   $nextflow run UnO.nf -profile conda, sge
 ----------------------------------------------------------------------------------------
 */
 
@@ -58,11 +58,10 @@ println """\
 */
 
 workflow {
-
     raw_reads_ch = FASTQC_RAW( reads_ch )
     //checkpoint
     trimmed_reads_ch = TRIMMOMATIC( reads_ch )
-    grouped_reads_ch = TRIMMOMATIC.out.trimmed_reads //this would be the trimmed_reads_ch
+        grouped_reads_ch = TRIMMOMATIC.out.trimmed_reads //this would be the trimmed_reads_ch
         .map { sample, reads -> [sample.group, sample, reads] }
         .groupTuple(by: 0)
         .map { group, samples, reads ->
@@ -78,16 +77,38 @@ workflow {
     //checkpoint
     //MIDAS2_TRIMMED ( TRIMMOMATIC.out.trimmed_reads )
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
-    mapped_reads_ch = BOWTIE2_MAP_READS( bt2_index_ch.bowtie2_index, grouped_reads_ch )
+    trimmed_reads_out = TRIMMOMATIC.out.trimmed_reads
+    bt2_reads_input = trimmed_reads_out.map{ sample, reads -> [sample.group, sample, reads]}
+    bt2_map_input_ch = BOWTIE2_INDEX.out.bowtie2_index //Formatting added to combine BAMs from all reads into JGISUMMARIZE process based on groups--maintains std formatting
+        .map {sample, assembly, index -> [ sample.group, sample, assembly, index] }
+        .combine(bt2_reads_input, by:0)
+        .map {group, assembly_sample, assembly, index, sample, reads -> [assembly_sample, assembly, index, sample, reads] }
+    mapped_reads_ch = BOWTIE2_MAP_READS( bt2_map_input_ch )
+        .groupTuple(by:0)
+        .map { assembly_sample, assembly, bams, bais -> [ assembly_sample, assembly.sort()[0], bams, bais ] }
     text_file_ch = grouped_reads_ch
         .map { sample, reads1, reads2 -> 
         reads1.join("\n") + "\n" + reads2.join("\n") 
         }
         .collectFile(name: 'grouped_reads.txt')
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, text_file_ch )
-    bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( mapped_reads_ch.aligned_bam )
-    metabat_bins_ch = METABAT2_BIN( megahit_assembly_ch.megahit_contigs, bam_contig_depth_ch.bam_contig_depth )
-    metaquast_ch = METAQUAST_EVAL ( megahit_assembly_ch.megahit_contigs )
+    jgi_mapped_reads_ch = mapped_reads_ch.map{ assembly_sample, assembly, bams, bais -> [assembly_sample, bams, bais]}
+    bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( jgi_mapped_reads_ch )
+    ch_metabat_depths = METABAT2_JGISUMMARIZECONTIGDEPTHS.out.bam_contig_depth
+        .map { assembly_sample, depths ->
+            def meta_new = assembly_sample + [binner: 'MetaBAT2']
+            [ meta_new, depths ]
+        }
+    consolidated_metabat_input = mapped_reads_ch
+        .map { assembly_sample, assembly, bams, bais ->
+            def meta_new = assembly_sample + [binner: 'MetaBAT2']
+            [meta_new, assembly, bams, bais]
+        }
+        .join( ch_metabat_depths, by: 0 )
+        .map { assembly_sample, assembly, bam, bai, depths ->
+            [ assembly_sample, assembly, depths ]}
+    metabat_bins_ch = METABAT2_BIN( consolidated_metabat_input ) //formatting for consolidating BAMS to generate depth and then Bin based on those combinded depths 
+    metaquast_ch = METAQUAST_EVAL( megahit_assembly_ch.megahit_contigs )
     //checkpoint
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
@@ -99,7 +120,7 @@ workflow {
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
     //index_refined_bins_ch = BOWTIE2_INDEX_BINS( refined_dastool_bins_ch.bins )
-    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS(index_refined_bins_ch.index, trimmed_reads_ch.trimmed_reads )
+    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS(index_refined_bins_ch.bt2_bin_index, trimmed_reads_ch.trimmed_reads )
 }
 
 /*
@@ -220,9 +241,9 @@ process MEGAHIT {
     def prefix = "${sample.group}"
     def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
-    megahit --presets meta-large $input -t 8 --out-prefix ${prefix}
+    megahit --presets meta-large $input -t 8 --out-prefix "MEGAHIT-${prefix}"
     """
-    
+    //adding MEGAHIT to denote assembler used per mag
     stub:
     """
     mkdir megahit_out
@@ -247,7 +268,7 @@ process BOWTIE2_INDEX {
     tuple val( sample ), path( assembly )
 
     output:
-    path ( "${sample.group}_index*.bt2" ), emit: bowtie2_index 
+    tuple val( sample ), path( assembly ), path ( "${sample.group}_index*.bt2" ), emit: bowtie2_index //adding path(assembly) per mag 
 
     script:
     def prefix = "${sample.group}"
@@ -272,30 +293,30 @@ process BOWTIE2_INDEX {
 * Mapping reads to bowtie2 index to evaluate coverage and for downstreaming binning tools.
 */
 process BOWTIE2_MAP_READS {
-    tag "BOWTIE2_MAP_READS ${index} ${reads1} ${reads2}" //"$assembler-$name"
+    tag "BOWTIE2_MAP_READS ${index} ${reads_trimmed}" //"$assembler-$name"
     label 'UnO'
     publishDir ("${params.outdir}/bowtie2_out/mapped", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
         //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
 
     input:
-    path( index )
-    tuple val( sample ), path( reads1 ), path( reads2 ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
+    tuple val( assembly_sample ), path( assembly ), path( index ), val( reads_sample ), path( reads_trimmed ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
     //val   save_unaligned
     //val   sort_bam
     
     
     output:
-    path( "${sample.id}_sorted.bam" ), emit: aligned_bam
-    path( "${sample.id}_sorted.bam.bai"), emit: aligned_bam_index 
+    tuple val( assembly_sample ), path( assembly ), path( "${reads_sample.id}_sorted.bam" ), path( "${reads_sample.id}_sorted.bam.bai"), emit: aligned_bam
     //path( "${sample_id}.bowtie2.log" ), emit: align_log
 
     script:
-    def idx = index[0].getBaseName(2)
-    def prefix = "${sample.id}"
+    //def idx = index[0].getBaseName(2)
+    def prefix = "${reads_sample.id}"
+    def input = "-1 \"${reads_trimmed[0]}\" -2 \"${reads_trimmed[1]}\""
     //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
     """
-    bowtie2 -p 8 -x ${idx} -q -1 ${reads1} -2 ${reads2} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
-    samtools index ${sample.id}_sorted.bam
+    INDEX=`find -L ./ -name "*.rev.1.bt2l" -o -name "*.rev.1.bt2" | sed 's/.rev.1.bt2l//' | sed 's/.rev.1.bt2//'`
+    bowtie2 -p 8 -x \$INDEX -q $input --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    samtools index ${prefix}_sorted.bam
     """
     //required the -h flag to make this work into view/sort commands
     //needed to dealre the correct output in declared output
@@ -320,14 +341,14 @@ process MAXBIN2_BIN {
     file(readstext) //updating this for new read grouping -might have to provide an abundance file and create the process to do so 
 
     output:
-    path( "*.fasta" )   , emit: binned_fastas
-    path( "*.summary" ) , emit: summary
-    path( "*.log" )     , emit: log
-    path( "*.marker" )  , emit: marker_counts
-    path( "*.noclass" ) , emit: unbinned_fasta
-    path( "*.tooshort" ), emit: tooshort_fasta
-    path( "*.abund*" )  , emit: abundance, optional: true
-    path( "*_bin.tar.gz" ) , emit: marker_bins , optional: true
+    tuple val( sample ), path( "*.fasta" )   , emit: binned_fastas
+    tuple val( sample ), path( "*.summary" ) , emit: summary
+    tuple val( sample ), path( "*.log" )     , emit: log
+    tuple val( sample ), path( "*.marker" )  , emit: marker_counts
+    tuple val( sample ), path( "*.noclass" ) , emit: unbinned_fasta
+    tuple val( sample ), path( "*.tooshort" ), emit: tooshort_fasta
+    tuple val( sample ), path( "*.abund*" )  , emit: abundance, optional: true
+    tuple val( sample ), path( "*_bin.tar.gz" ) , emit: marker_bins , optional: true
     ///smae thing below for multiple sets of reads     
     script:
     """
@@ -349,28 +370,29 @@ process MAXBIN2_BIN {
     """
 }
 /*
- * JGIsummarizeBAMcontigdepths script wihtin metabat2 
+ * JGIsummarizeBAMcontigdepths script within metabat2 
  */
  process METABAT2_JGISUMMARIZECONTIGDEPTHS {
-    tag "METABAT2_JGISUMMARIZECONTIGDEPTHS ${aligned_bam_file}"
+    tag "METABAT2_JGISUMMARIZECONTIGDEPTHS ${aligned_bam}"
     label 'UnO'
     publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
-
+    ignoreEmpty = true
     input:
-    path( aligned_bam_file )
+    tuple val( assembly_sample ), path( aligned_bam ), path( aligned_bai )
     
     output:
-    path( "${aligned_bam_file.simpleName}.depth.txt" ) , emit: bam_contig_depth
+    tuple val( assembly_sample ), path( "*_depth.txt" ) , emit: bam_contig_depth
 
     script:
+    def prefix = "${assembly_sample.id}"
     """
-    jgi_summarize_bam_contig_depths --outputDepth ${aligned_bam_file.simpleName}.depth.txt ${aligned_bam_file}
+    jgi_summarize_bam_contig_depths --outputDepth ${prefix}_depth.txt ${aligned_bam}
     """
 
     stub:
     """
     mkdir MetaBat2
-    touch ${aligned_bam_file.simpleName}.depth.txt
+    touch stub.depth.txt
     """
  }
  /*
@@ -380,29 +402,27 @@ process METABAT2_BIN {
     tag "METABAT2_BIN ${assembly} ${depth}"
     label 'UnO'
     publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
-
+    ignoreEmpty = true //this makes MetaBat2 wait to receive all input files from JGISUMMARIZE
     input:
-    tuple val( sample ), path( assembly )
-    path( depth )
-
+    tuple val( assembly_sample ), path( assembly ), path( depth )
+    
     output:
     //path( "${assembly}.depth.txt" )                                             , emit: metabat2_depth
     //path( "${assembly}.unbinned.fa" )                                           , emit: unbinned
     //path( "${assembly}.paired.txt" )                                            , emit: summary
-    path( "*.fa" )                                     , emit: binned_fastas //changing the struture of this to allow me to call the directory later 
+    tuple val( assembly_sample ), path( "*.fa" )                                  , emit: binned_fastas //changing the struture of this to allow me to call the directory later 
         
     script:
     """
-    metabat2 -i ${assembly} -a ${depth} -o ${assembly.simpleName}
+    metabat2 -i ${assembly} -a ${depth} -o MetaBat2_${assembly.baseName}
     """
     //mag has additonal code to zip the fasta bins--might consider to cut down on space
-    //resolved issues by adding jgi_depth set and by calling metabat2 instead of runMetaBat.sh
     //formatted bin outdir correctly for legibility 
     stub:
     """
-    touch ${assembly}.paired.txt
-    touch ${assembly}.unbinned.fa
-    touch ${assembly.simpleName}.fa
+    touch ${assembly_sample}.paired.txt
+    touch ${assembly_sample}.unbinned.fa
+    touch ${assembly_sample}.fa
     """
 }
 //adding quast to environment via mamba 
@@ -470,8 +490,8 @@ process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool enviro
     
     //needed to add a conda profile for das_tool environment-set for this process specifically  
     input:
-    path( maxbin_fasta )
-    path( metabat_fasta )
+    tuple val( sample ), path( maxbin_fasta )
+    tuple val(asssembly_sample), path( metabat_fasta )
 
 
     output:
@@ -636,29 +656,59 @@ process BOWTIE2_INDEX_BINS{
     path( refined_bins )
 
     output:
-    input:
-    tuple val( sample ), path( assembly )
-
-    output:
-    path ( "${sample.group}_index*.bt2" ), emit: bowtie2_index 
+    path ( "${refined_bins.baseName}_index*.bt2" ), emit: bt2_bin_index 
 
     script:
-    def prefix = "${sample.group}"
+    def prefix = "${refined_bins.baseName}"
     """
-    bowtie2-build ${assembly} ${prefix}_index
+    bowtie2-build ${refined_bins} ${prefix}_index
     touch ${prefix}_index
     """
 
     stub:
     """
     mkdir bowtie2_out
-    touch ${sample.group}_index.1.bt2
-    touch ${sample.group}_index.2.bt2
-    touch ${sample.group}_index.3.bt2
-    touch ${sample.group}_index.4.bt2
-    touch ${sample.group}_index.rev.1.bt2
-    touch ${sample.group}_index.rev.2.bt2
-    touch ${sample.group}_index
+    touch ${refined_bins.baseName}_index.1.bt2
+    touch ${refined_bins.baseName}_index.2.bt2
+    touch ${refined_bins.baseName}_index.3.bt2
+    touch ${refined_bins.baseName}_index.4.bt2
+    touch ${refined_bins.baseName}_index.rev.1.bt2
+    touch ${refined_bins.baseName}_index.rev.2.bt2
+    touch ${refined_bins.baseName}_index
+    """
+}
+process BOWTIE2_MAP_BINS {
+    tag "BOWTIE2_MAP_BINS ${index} ${reads_trimmed}" //"$assembler-$name"
+    label 'UnO'
+    publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
+        //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
+
+    input:
+    path( index )
+    tuple val( sample ), path( reads_trimmed )
+       
+    
+    output:
+    path( "${sample.id}_sorted.bam" ), emit: aligned_bins_bam
+    path( "${sample.id}_sorted.bam.bai"), emit: aligned_bam_bin_index 
+    //path( "${sample_id}.bowtie2.log" ), emit: align_log
+
+    script:
+    def idx = index[0].getBaseName(2)
+    def prefix = "${sample.id}"
+    //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
+    """
+    bowtie2 -p 8 -x ${idx} -q -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    samtools index ${sample.id}_sorted.bam
+    """
+    //required the -h flag to make this work into view/sort commands
+    //needed to dealre the correct output in declared output
+    // will need this to accomodate multiple reads 
+    stub:
+    """
+    mkdir mapped
+    touch ${sample.id}_sorted.bam
+    touch ${sample.id}_sorted.bam.bai
     """
 }
 /*
