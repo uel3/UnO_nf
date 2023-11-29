@@ -79,7 +79,7 @@ workflow {
     bt2_index_ch = BOWTIE2_INDEX( megahit_assembly_ch.megahit_contigs )
     trimmed_reads_out = TRIMMOMATIC.out.trimmed_reads
     bt2_reads_input = trimmed_reads_out.map{ sample, reads -> [sample.group, sample, reads]}
-    bt2_map_input_ch = BOWTIE2_INDEX.out.bowtie2_index
+    bt2_map_input_ch = BOWTIE2_INDEX.out.bowtie2_index //Formatting added to combine BAMs from all reads into JGISUMMARIZE process based on groups--maintains std formatting
         .map {sample, assembly, index -> [ sample.group, sample, assembly, index] }
         .combine(bt2_reads_input, by:0)
         .map {group, assembly_sample, assembly, index, sample, reads -> [assembly_sample, assembly, index, sample, reads] }
@@ -107,8 +107,7 @@ workflow {
         .join( ch_metabat_depths, by: 0 )
         .map { assembly_sample, assembly, bam, bai, depths ->
             [ assembly_sample, assembly, depths ]}
-    consolidated_metabat_input.view()
-    metabat_bins_ch = METABAT2_BIN( consolidated_metabat_input )
+    metabat_bins_ch = METABAT2_BIN( consolidated_metabat_input ) //formatting for consolidating BAMS to generate depth and then Bin based on those combinded depths 
     metaquast_ch = METAQUAST_EVAL( megahit_assembly_ch.megahit_contigs )
     //checkpoint
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
@@ -403,7 +402,7 @@ process METABAT2_BIN {
     tag "METABAT2_BIN ${assembly} ${depth}"
     label 'UnO'
     publishDir ("${params.outdir}/MetaBat2", mode: 'copy')
-    ignoreEmpty = true
+    ignoreEmpty = true //this makes MetaBat2 wait to receive all input files from JGISUMMARIZE
     input:
     tuple val( assembly_sample ), path( assembly ), path( depth )
     
@@ -415,10 +414,9 @@ process METABAT2_BIN {
         
     script:
     """
-    metabat2 -i ${assembly} -a ${depth} -o ${assembly.baseName}
+    metabat2 -i ${assembly} -a ${depth} -o MetaBat2_${assembly.baseName}
     """
     //mag has additonal code to zip the fasta bins--might consider to cut down on space
-    //resolved issues by adding jgi_depth set and by calling metabat2 instead of runMetaBat.sh
     //formatted bin outdir correctly for legibility 
     stub:
     """
