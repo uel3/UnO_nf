@@ -6,7 +6,7 @@
    Contact  :
    Commands to run: 
    $module load nextflow/22.10.6.5843
-   $nextflow run QC_Trim_Mega_BT_ST.nf -profile conda, sge
+   $nextflow run UnO.nf -profile conda, sge
 ----------------------------------------------------------------------------------------
 */
 
