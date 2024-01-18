@@ -17,6 +17,8 @@ Steps for UnO Tier 2:
 Usage:
 nextflow run QC_Trim_Mega_BT_ST.nf -profile conda, sge
 NextFlow version--- currently running on version 22.10.6
-Input format-- currently set by params directory containing filenames with wild cards as will --be changed to --input flag
+Input format-- currently set by params (directory containing filenames with wild cards) will be changed to --input flag
 
 Output- sets of bins, gene predictions
+MIDAS2 module is run seperately on trimmed reads but will soon be integrated into the UnO-nf workflow
+Input format-currently set by params 
