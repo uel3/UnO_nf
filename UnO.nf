@@ -16,7 +16,7 @@ nextflow.enable.dsl=2
 
 params.outdir = 'results_multi'
 //params.reads = "$HOME/coal_reads/subset_3/*_{1,2}.fastq.gz" //using a subet of 3 reads to test multiple reads on the pipeline-10 sets was too much 
-params.reads = "$HOME/coal_reads/small_3/*_{1,2}.fastq.gz" //smaller fastqs for faster test runs 
+params.reads = "$HOME/UnO_nf/test/*_R{1,2}*.fastq.gz" //test datas 
 
 println """\
          U n O - N F   P I P E L I N E
