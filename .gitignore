@@ -10,8 +10,6 @@
 /.nextflow.log.8
 /.nextflow.log.9
 /list_of_files.csv
-/mag_test
-/results
 /test_channels.nf
 /work
 /workflow.nf
@@ -24,8 +22,10 @@ MIDAS2_sing/
 singulairty_wf.txt
 checkm_qa.tsv
 test_collect.nf
-/results_multiple_reads_finished/
 megahit_resoruces.sh
 UnO_HPC.sh
-/results_multi_JGIdepths_wrong/
 /results_multi/
+/results_multi_bin_mapping/
+/alabama_UnO_results/
+/colorado_UnO_results/
+packages.txt
