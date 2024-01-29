@@ -60,7 +60,7 @@ process MIDAS2_DB_BUILD {
     label 'midas2'//changing this to point to midas_changed env in config
 
     publishDir("${params.outdir}", mode: 'copy') //do I want to copy this--probably not--just link it
-    conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
+    conda '$HOME/.conda/envs/midas2.0'
     
     output:
     path( "my_midasdb_uhgg/*" ), emit: uhgg_db
@@ -87,7 +87,7 @@ process MIDAS2_SPECIES_SNPS {
     label 'midas2'
 
     publishDir("${params.outdir}", mode: 'copy') 
-    conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
+    conda '$HOME/.conda/envs/midas2.0'
 
     input:
     tuple val( sample ), path( reads )
@@ -155,7 +155,7 @@ process MIDAS2_SNPS {
     label 'midas2'
 
     publishDir("${params.outdir}", mode: 'copy')
-    conda '/scicomp/home-pure/uel3/.conda/envs/midas_changed'
+    conda '$HOME/.conda/envs/midas2.0'
     
     input:
     tuple val( sample ), path( reads )
