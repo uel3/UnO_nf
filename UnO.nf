@@ -5,7 +5,7 @@
    Github   : 
    Contact  :
    Commands to run: 
-   $module load nextflow/22.10.6.5843
+   $module load nextflow/22.10.6
    $nextflow run UnO.nf -profile conda, sge
 ----------------------------------------------------------------------------------------
 */
@@ -112,6 +112,8 @@ workflow {
     //checkpoint
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
+    refined_bin_channel_check = DASTOOL_BINNING.out.bins
+    refined_bin_channel_check.view()
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
     //checkpoint
     flatten_refined_dastool_bins_ch = DASTOOL_BINNING.out.bins.flatten() //this flattens the channel so each bin file can be seperately processed by prodigal 
@@ -119,8 +121,10 @@ workflow {
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
-    //index_refined_bins_ch = BOWTIE2_INDEX_BINS( refined_dastool_bins_ch.bins )
-    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS(index_refined_bins_ch.bt2_bin_index, trimmed_reads_ch.trimmed_reads )
+    index_refined_bins_ch = BOWTIE2_INDEX_BINS( flatten_refined_dastool_bins_ch ) //taking in the flattened bins might process them seperately...if not may need to format channel 
+    test_index_ch = BOWTIE2_INDEX_BINS.out.bowtie2_bin_index
+    test_index_ch.view()
+    reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS( index_refined_bins_ch.bowtie2_bin_index, trimmed_reads_ch.trimmed_reads )
 }
 
 /*
@@ -241,7 +245,7 @@ process MEGAHIT {
     def prefix = "${sample.group}"
     def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
-    megahit --presets meta-large $input -t 8 --out-prefix "MEGAHIT-${prefix}"
+    megahit --presets meta-large $input -t 12 --mem-flag 2 --out-prefix "MEGAHIT-${prefix}"
     """
     //adding MEGAHIT to denote assembler used per mag
     stub:
@@ -491,7 +495,7 @@ process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool enviro
     //needed to add a conda profile for das_tool environment-set for this process specifically  
     input:
     tuple val( sample ), path( maxbin_fasta )
-    tuple val(asssembly_sample), path( metabat_fasta )
+    tuple val( assembly_sample ), path( metabat_fasta )
 
 
     output:
@@ -531,7 +535,7 @@ process DASTOOL_BINNING { //can provide link to conda environemnt with yml file.
     tuple val( sample ), path("*_summary.tsv")              , optional: true, emit: summary
     tuple val( sample ), path("*_DASTool_contig2bin.tsv")   , optional: true, emit: contig2bin
     tuple val( sample ), path("*.eval")                     , optional: true, emit: eval
-    tuple val( sample ), path("*_DASTool_bins/*.fa")        , optional: true, emit: bins
+    path("*_DASTool_bins/*.fa")        , optional: true, emit: bins
     tuple val( sample ), path("*.pdf")                      , optional: true, emit: pdfs
     tuple val( sample ), path("*.candidates.faa")           , optional: true, emit: fasta_proteins
     tuple val( sample ), path("*.faa")                      , optional: true, emit: candidates_faa
@@ -600,7 +604,7 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
     """
     mkdir CheckM
     touch CheckM/lineage.ms
-    mkdir CheckM/bins[
+    mkdir CheckM/bins
     touch CheckM/bins/stub.bin
     mkdir CheckM/storage
     touch CheckM/storage/bin_stats.analyze.tsv
@@ -625,7 +629,7 @@ process PRODIGAL_ANON{
     path( refined_bins )
     
     output:
-    path("${refined_bins.baseName}.gff"),                 emit: gene_annotations
+    path("${refined_bins.baseName}.gff"),                 emit: gene_annotations //might need to change these to ${sample} instead of the refined.baseName
     path("${refined_bins.baseName}.fna"),                 emit: nucleotide_fasta
     path("${refined_bins.baseName}.faa"),                 emit: amino_acid_fasta
     path("${refined_bins.baseName}_all.txt"),             emit: all_gene_annotations
@@ -650,18 +654,18 @@ Creating and Bowtie2 index of refined DASTool bins to map trimmmed to
 process BOWTIE2_INDEX_BINS{
     tag "BOWTIE2_INDEX_BINS ${refined_bins}"
     label 'UnO'
-    publishDir ("${params.oudir}/bowtie2_out/bin_index", mode: 'copy')
+    publishDir ("${params.outdir}/bowtie2_out/bin_index", mode: 'copy')
 
     input:
-    tuple val( sample ), path( assembly )
+    path( refined_bins )
 
     output:
-    tuple val( sample ), path( assembly ), path ( "${sample.group}_index*.bt2" ), emit: bowtie2_index //adding path(assembly) per mag 
+    path( "${refined_bins.baseName}_index*.bt2" ), emit: bowtie2_bin_index 
 
     script:
-    def prefix = "${sample.group}"
+    def prefix = "${refined_bins.baseName}"
     """
-    bowtie2-build ${assembly} ${prefix}_index
+    bowtie2-build ${refined_bins} ${prefix}_index
     touch ${prefix}_index
     """
 
@@ -669,34 +673,36 @@ process BOWTIE2_INDEX_BINS{
     """
     mkdir bowtie2_out
     mkdir bowtie2_out/bin_index
-    touch ${sample.group}_index.1.bt2
-    touch ${sample.group}_index.2.bt2
-    touch ${sample.group}_index.3.bt2
-    touch ${sample.group}_index.4.bt2
-    touch ${sample.group}_index.rev.1.bt2
-    touch ${sample.group}_index.rev.2.bt2
-    touch ${sample.group}_index
+    touch ${sample}_index.1.bt2
+    touch ${sample}_index.2.bt2
+    touch ${sample}_index.3.bt2
+    touch ${sample}_index.4.bt2
+    touch ${sample}_index.rev.1.bt2
+    touch ${sample}_index.rev.2.bt2
+    touch ${sample}_index
     """
 }
-process BOWTIE2_MAP_BINS {
+/* 
+Mapping reads to Bins with Bowtie2
+*/
+process BOWTIE2_MAP_BINS{
     tag "BOWTIE2_MAP_BINS ${index} ${reads_trimmed}" //"$assembler-$name"
     label 'UnO'
-    publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
-        //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
+    publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') 
 
     input:
-    tuple val( assembly_sample ), path( assembly ), path( index ), val( reads_sample ), path( reads_trimmed ) //things to consider--this is using unformatted output from trimmomatic. It contains reads information-unlike the grouping steps -look into prefix set up--
+    path( index )
+    tuple val( sample ), path( reads_trimmed )  
     //val   save_unaligned
     //val   sort_bam
     
-    
     output:
-    tuple val( assembly_sample ), path( assembly ), path( "${reads_sample.id}_sorted.bam" ), path( "${reads_sample.id}_sorted.bam.bai"), emit: aligned_bam
+    path( "${sample.id}_sorted.bam" ), emit: aligned_bam_to_bins
+    path( "${sample.id}_sorted.bam.bai"), emit: aligned_bam_to_bins_index
     //path( "${sample_id}.bowtie2.log" ), emit: align_log
 
     script:
-    //def idx = index[0].getBaseName(2)
-    def prefix = "${reads_sample.id}"
+    def prefix = "${sample.id}"
     def input = "-1 \"${reads_trimmed[0]}\" -2 \"${reads_trimmed[1]}\""
     //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
     """
