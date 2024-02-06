@@ -126,7 +126,7 @@ workflow {
     //test_index_ch.view()
     //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS( index_refined_bins_ch.bowtie2_bin_index, trimmed_reads_ch.trimmed_reads )
     concatenated_bins_ch = CONCAT_REFINED_BINS( refined_dastool_bins_ch.bins )
-    //concatenated_refined_bins_index_ch = BT2_INDEX_CONCAT_BIN_FILE( concatenated_bins_ch.concatenated_bins_file )
+    concatenated_refined_bins_index_ch = BT2_INDEX_CONCAT_BIN_FILE( concatenated_bins_ch.concatenated_bins_file )
     //reads_mapped_to_bins_ch = MAP_READS_CONCAT_BINS( concantenated_refined_bins_index_ch.bowtie2_concat_bin_index, trimmed_reads_ch.trimmed_reads )
     //read_coverage_bins_ch = JGISUMMARIZE_BINS_DEPTH( reads_mapped_to_bins_ch.mapped_reads_bam )
 }
@@ -759,7 +759,7 @@ process BT2_INDEX_CONCAT_BIN_FILE{
     publishDir ("${params.outdir}/bowtie2_out/concat_bin_index", mode: 'copy')
     
     input:
-    path ( concat_bins_file )
+    file( concat_bins_file )
 
     output:
     path( "${concat_bins_file.baseName}_index*.bt2" ), emit: bowtie2_concat_bin_index 
