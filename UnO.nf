@@ -16,7 +16,7 @@ nextflow.enable.dsl=2
 
 params.outdir = 'results_multi'
 //params.reads = "$HOME/coal_reads/subset_3/*_{1,2}.fastq.gz" //using a subet of 3 reads to test multiple reads on the pipeline-10 sets was too much 
-params.reads = "$HOME/UnO_nf/test/*_R{1,2}*.fastq.gz" //test datas 
+params.reads = "$HOME/UnO_nf/test/*_{1,2}*.fastq.gz" //test data
 
 println """\
          U n O - N F   P I P E L I N E
@@ -121,10 +121,14 @@ workflow {
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
-    index_refined_bins_ch = BOWTIE2_INDEX_BINS( flatten_refined_dastool_bins_ch ) //taking in the flattened bins might process them seperately...if not may need to format channel 
-    test_index_ch = BOWTIE2_INDEX_BINS.out.bowtie2_bin_index
-    test_index_ch.view()
-    reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS( index_refined_bins_ch.bowtie2_bin_index, trimmed_reads_ch.trimmed_reads )
+    //index_refined_bins_ch = BOWTIE2_INDEX_BINS( flatten_refined_dastool_bins_ch ) //taking in the flattened bins might process them seperately...if not may need to format channel 
+    //test_index_ch = BOWTIE2_INDEX_BINS.out.bowtie2_bin_index
+    //test_index_ch.view()
+    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS( index_refined_bins_ch.bowtie2_bin_index, trimmed_reads_ch.trimmed_reads )
+    concatenated_bins_ch = CONCAT_REFINED_BINS( refined_dastool_bins_ch.bins )
+    //concatenated_refined_bins_index_ch = BT2_INDEX_CONCAT_BIN_FILE( concatenated_bins_ch.concatenated_bins_file )
+    //reads_mapped_to_bins_ch = MAP_READS_CONCAT_BINS( concantenated_refined_bins_index_ch.bowtie2_concat_bin_index, trimmed_reads_ch.trimmed_reads )
+    //read_coverage_bins_ch = JGISUMMARIZE_BINS_DEPTH( reads_mapped_to_bins_ch.mapped_reads_bam )
 }
 
 /*
@@ -715,11 +719,132 @@ process BOWTIE2_MAP_BINS{
     // will need this to accomodate multiple reads 
     stub:
     """
-    mkdir mapped
+    mkdir mapped_bins
     touch ${sample.id}_sorted.bam
     touch ${sample.id}_sorted.bam.bai
     """
 }
+
+/* 
+Including alternate read mapping approach for co-assembled + refined bins
+*/
+process CONCAT_REFINED_BINS{
+    tag "CONCAT_REFINED_BINS ${refined_bins}"
+    label 'UnO'
+    publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
+
+    input:
+    path( refined_bins )
+
+    output:
+    path("DAStool_bins_concatenated.fna"), emit: concatenated_bins_file
+
+    script:
+    """
+    cat ${refined_bins} > DAStool_bins_concatenated.fna
+    """
+    stub:
+    """
+    mkdir DASTool_out
+    touch DAStool_bins_concatenated.fna
+    """
+
+}
+/*
+Generate index file for concatenated bin file
+*/
+process BT2_INDEX_CONCAT_BIN_FILE{
+    tag "BT2_INDEX_CONCAT_BIN_FILE ${concat_bins_file}" // need to check inputs and outputs
+    label 'UnO'
+    publishDir ("${params.outdir}/bowtie2_out/concat_bin_index", mode: 'copy')
+    
+    input:
+    path ( concat_bins_file )
+
+    output:
+    path( "${concat_bins_file.baseName}_index*.bt2" ), emit: bowtie2_concat_bin_index 
+
+    script:
+    def prefix = "${concat_bins_file.baseName}"
+    """
+    bowtie2-build ${concat_bins_file} ${prefix}_index
+    touch ${prefix}_index
+    """
+    stub:
+    """
+    mkdir bowtie2_out
+    mkdir concat_bin_index
+    touch ${concat_bins_file.baseName}_index.1.bt2
+    touch ${concat_bins_file.baseName}_index.2.bt2
+    touch ${concat_bins_file.baseName}_index.3.bt2
+    touch ${concat_bins_file.baseName}_index.4.bt2
+    touch ${concat_bins_file.baseName}_index.rev.1.bt2
+    touch ${concat_bins_file.baseName}_index.rev.2.bt2
+    touch ${concat_bins_file.baseName}_index
+    """
+}
+/*
+Mapping reads to bin with bowtie index 
+*/
+process MAP_READS_CONCAT_BINS{
+    tag "MAP_READS_CONCAT_BINS ${index} ${reads_trimmed}" //need to double check on inputs and outputs 
+    label 'UnO'
+    publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') 
+
+    input:
+    path( index )
+    tuple val( sample ), path( reads_trimmed )  
+        
+    output:
+    path( "${sample.id}_sorted.bam" ), emit: mapped_reads_bam
+    path( "${sample.id}_sorted.bam.bai"), emit: mapped_reads_bam_index
+    //path( "${sample_id}.bowtie2.log" ), emit: align_log
+
+    script:
+    def prefix = "${sample.id}"
+    def input = "-1 \"${reads_trimmed[0]}\" -2 \"${reads_trimmed[1]}\""
+    //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
+    """
+    INDEX=`find -L ./ -name "*.rev.1.bt2l" -o -name "*.rev.1.bt2" | sed 's/.rev.1.bt2l//' | sed 's/.rev.1.bt2//'`
+    bowtie2 -p 8 -x \$INDEX -q $input --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    samtools index ${prefix}_sorted.bam
+    """
+
+    stub:
+    """
+    mkdir mapped_bins
+    touch ${sample.id}_sorted.bam
+    touch ${sample.id}_sorted.bam.bai
+    """
+}
+/*
+Using MetaBat2 to generate covereage information from reads mapped to index
+*/
+process JGISUMMARIZE_BINS_DEPTH{
+    tag "JGISUMMARIZE_BINS_DEPTH ${mapped_reads_bam}" //need to check that these work together 
+    label 'UnO'
+    publishDir ("${params.outdir}/Read_Coverage", mode: 'copy')
+    ignoreEmpty = true
+    
+    input:
+    tuple val( assembly_sample ), path( mapped_reads_bam ), path( aligned_bai ) //need to check in inputs and outputs for this part the assembly sample is the group which results in a single depth file
+    
+    output:
+    tuple val( assembly_sample ), path( "*_bins_cov_table.txt" ) , emit: bam_contig_depth_mapped_reads 
+
+    script:
+    def prefix = "${assembly_sample.id}"
+    """
+    jgi_summarize_bam_contig_depths --outputDepth ${prefix}_bins_cov_table.txt ${mapped_reads_bam}
+    """
+
+    stub:
+    """
+    mkdir Read_Coverage
+    touch ${prefix}_bins_cov_table.txt
+    """
+}
+
 /*
 ========================================================================================
    Workflow Event Handler
