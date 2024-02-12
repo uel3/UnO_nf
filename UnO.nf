@@ -5,7 +5,7 @@
    Github   : github.com/uel3/UnO_nf
    Contact  :
    Commands to run: 
-   $module load nextflow/22.10.6.5843
+   $module load nextflow/22.10.6
    $nextflow run UnO.nf -profile conda, sge
 ----------------------------------------------------------------------------------------
 */
@@ -16,7 +16,7 @@ nextflow.enable.dsl=2
 
 params.outdir = 'results_multi'
 //params.reads = "$HOME/coal_reads/subset_3/*_{1,2}.fastq.gz" //using a subet of 3 reads to test multiple reads on the pipeline-10 sets was too much 
-params.reads = "$HOME/UnO_nf/test/*_R{1,2}*.fastq.gz" //test datas 
+params.reads = "$HOME/UnO_nf/test/*_{1,2}*.fastq.gz" //test data
 
 println """\
          U n O - N F   P I P E L I N E
@@ -90,7 +90,7 @@ workflow {
         .map { sample, reads1, reads2 -> 
         reads1.join("\n") + "\n" + reads2.join("\n") 
         }
-        .collectFile(name: 'grouped_reads.txt')
+        .collectFile(name: 'grouped_reads.txt') //may need to use the mag functionality of converting maxbin2 depth to abundance file instead of this...
     max_bin_ch = MAXBIN2_BIN( megahit_assembly_ch.megahit_contigs, text_file_ch )
     jgi_mapped_reads_ch = mapped_reads_ch.map{ assembly_sample, assembly, bams, bais -> [assembly_sample, bams, bais]}
     bam_contig_depth_ch = METABAT2_JGISUMMARIZECONTIGDEPTHS( jgi_mapped_reads_ch )
@@ -112,17 +112,28 @@ workflow {
     //checkpoint
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
+    refined_bin_channel_check = DASTOOL_BINNING.out.bins
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
     //checkpoint
-    flatten_refined_dastool_bins_ch = DASTOOL_BINNING.out.bins.flatten() //this flattens the channel so each bin file can be seperately processed by prodigal 
+    prodigal_bin_input_ch = DASTOOL_BINNING.out.bins
+        .map {sample, bins -> [bins]}
+    flatten_refined_dastool_bins_ch = prodigal_bin_input_ch.flatten() //this flattens the channel so each bin file can be seperately processed by prodigal 
     prodigal_gene_prediction_ch = PRODIGAL_ANON( flatten_refined_dastool_bins_ch )
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
-    //index_refined_bins_ch = BOWTIE2_INDEX_BINS( refined_dastool_bins_ch.bins )
-    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS(index_refined_bins_ch.bt2_bin_index, trimmed_reads_ch.trimmed_reads )
+    concatenated_bins_ch = CONCAT_REFINED_BINS( refined_dastool_bins_ch.bins )
+    concatenated_refined_bins_index_ch = BT2_INDEX_CONCAT_BIN_FILE( concatenated_bins_ch.concatenated_bins_file )
+    concat_bin_index_ch = BT2_INDEX_CONCAT_BIN_FILE.out.bowtie2_concat_bin_index
+    //concat_bin_index_ch.view() //this contains group and paths to indeces 
+    read_to_bin_mapping_input_ch = concat_bin_index_ch
+        .map { sample, index -> [sample.group, index]}
+        .combine(bt2_reads_input, by:0)
+        .map {group, index, sample, reads -> [index, sample, reads]}
+    //read_to_bin_mapping_input_ch.view()
+    reads_mapped_to_bins_ch = MAP_READS_CONCAT_BINS( read_to_bin_mapping_input_ch )
+    //read_coverage_bins_ch = JGISUMMARIZE_BINS_DEPTH( reads_mapped_to_bins_ch.mapped_reads_bam )
 }
-
 /*
 ========================================================================================
    Processes
@@ -241,7 +252,7 @@ process MEGAHIT {
     def prefix = "${sample.group}"
     def input = "-1 \"" + reads1.join(",") + "\" -2 \"" + reads2.join(",") + "\""
     """
-    megahit --presets meta-large $input -t 8 --out-prefix "MEGAHIT-${prefix}"
+    megahit --presets meta-large $input -t 12 --mem-flag 2 --out-prefix "MEGAHIT-${prefix}"
     """
     //adding MEGAHIT to denote assembler used per mag
     stub:
@@ -338,7 +349,7 @@ process MAXBIN2_BIN {
 
     input:
     tuple val( sample ), path( assembly )
-    file(readstext) //updating this for new read grouping -might have to provide an abundance file and create the process to do so 
+    file(readstext) 
 
     output:
     tuple val( sample ), path( "*.fasta" )   , emit: binned_fastas
@@ -349,7 +360,7 @@ process MAXBIN2_BIN {
     tuple val( sample ), path( "*.tooshort" ), emit: tooshort_fasta
     tuple val( sample ), path( "*.abund*" )  , emit: abundance, optional: true
     tuple val( sample ), path( "*_bin.tar.gz" ) , emit: marker_bins , optional: true
-    ///smae thing below for multiple sets of reads     
+    
     script:
     """
     run_MaxBin.pl -thread 8 -contig ${assembly} -out MaxBin2_${assembly.simpleName} -reads_list ${readstext}
@@ -491,7 +502,7 @@ process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool enviro
     //needed to add a conda profile for das_tool environment-set for this process specifically  
     input:
     tuple val( sample ), path( maxbin_fasta )
-    tuple val(asssembly_sample), path( metabat_fasta )
+    tuple val( assembly_sample ), path( metabat_fasta )
 
 
     output:
@@ -500,8 +511,8 @@ process DASTOOL_CONTIG2BIN { //needed to add a conda profile for das_tool enviro
     
     script: //shortened output names to see if output is not longer empty -didn't work adding . as the input worked will need to include better names than just maxbin/metabat.contigs2bin.tsv but works for now 
     """
-    Fasta_to_Contig2Bin.sh -i . -e fa > maxbin.contigs2bin.tsv 
-    Fasta_to_Contig2Bin.sh -i . -e fasta > metabat.contigs2bin.tsv
+    Fasta_to_Contig2Bin.sh -i . -e fasta > maxbin.contigs2bin.tsv 
+    Fasta_to_Contig2Bin.sh -i . -e fa > metabat.contigs2bin.tsv
 
     """
 
@@ -526,19 +537,19 @@ process DASTOOL_BINNING { //can provide link to conda environemnt with yml file.
     path( metabat_tsv )
     tuple val( sample ), path( assembly )
 
-    output: //updating the output based on DASTool NF module output-this did nothing to change the error-per DASTool githun this is an error with command line syntax
-    path("*.log")                                      , emit: log
-    path("*_summary.tsv")              , optional: true, emit: summary
-    path("*_DASTool_contig2bin.tsv")   , optional: true, emit: contig2bin
-    path("*.eval")                     , optional: true, emit: eval
-    path("*_DASTool_bins/*.fa")        , optional: true, emit: bins
-    path("*.pdf")                      , optional: true, emit: pdfs
-    path("*.candidates.faa")           , optional: true, emit: fasta_proteins
-    path("*.faa")                      , optional: true, emit: candidates_faa
-    path("*.archaea.scg")              , optional: true, emit: fasta_archaea_scg
-    path("*.bacteria.scg")             , optional: true, emit: fasta_bacteria_scg
-    path("*.b6")                       , optional: true, emit: b6
-    path("*.seqlength")                , optional: true, emit: seqlength
+    output: //updating the output based on DASTool NF module output-this did nothing to change the error-per DASTool github this is an error with command line syntax
+    tuple val( sample ), path("*.log")                                      , emit: log
+    tuple val( sample ), path("*_summary.tsv")              , optional: true, emit: summary
+    tuple val( sample ), path("*_DASTool_contig2bin.tsv")   , optional: true, emit: contig2bin
+    tuple val( sample ), path("*.eval")                     , optional: true, emit: eval
+    tuple val( sample ), path("*_DASTool_bins/*.fa")        , optional: true, emit: bins
+    tuple val( sample ), path("*.pdf")                      , optional: true, emit: pdfs
+    tuple val( sample ), path("*.candidates.faa")           , optional: true, emit: fasta_proteins
+    tuple val( sample ), path("*.faa")                      , optional: true, emit: candidates_faa
+    tuple val( sample ), path("*.archaea.scg")              , optional: true, emit: fasta_archaea_scg
+    tuple val( sample ), path("*.bacteria.scg")             , optional: true, emit: fasta_bacteria_scg
+    tuple val( sample ), path("*.b6")                       , optional: true, emit: b6
+    tuple val( sample ), path("*.seqlength")                , optional: true, emit: seqlength
     
     script:
     """
@@ -579,7 +590,7 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
     publishDir ("${params.outdir}", mode: 'copy') //need to add a way to include naming information for labeling purposes
     
     input:
-    path( refined_bins )
+    tuple val( sample ), path( refined_bins )
     
     output:
     path("CheckM/bins/*")                                  ,  emit: checkm_bins
@@ -600,7 +611,7 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
     """
     mkdir CheckM
     touch CheckM/lineage.ms
-    mkdir CheckM/bins[
+    mkdir CheckM/bins
     touch CheckM/bins/stub.bin
     mkdir CheckM/storage
     touch CheckM/storage/bin_stats.analyze.tsv
@@ -625,7 +636,7 @@ process PRODIGAL_ANON{
     path( refined_bins )
     
     output:
-    path("${refined_bins.baseName}.gff"),                 emit: gene_annotations
+    path("${refined_bins.baseName}.gff"),                 emit: gene_annotations //might need to change these to ${sample} instead of the refined.baseName
     path("${refined_bins.baseName}.fna"),                 emit: nucleotide_fasta
     path("${refined_bins.baseName}.faa"),                 emit: amino_acid_fasta
     path("${refined_bins.baseName}_all.txt"),             emit: all_gene_annotations
@@ -650,13 +661,13 @@ Creating and Bowtie2 index of refined DASTool bins to map trimmmed to
 process BOWTIE2_INDEX_BINS{
     tag "BOWTIE2_INDEX_BINS ${refined_bins}"
     label 'UnO'
-    publishDir ("${params.oudir}/bowtie2_out/indexed_bins", mode: 'copy')
+    publishDir ("${params.outdir}/bowtie2_out/bin_index", mode: 'copy')
 
     input:
     path( refined_bins )
 
     output:
-    path ( "${refined_bins.baseName}_index*.bt2" ), emit: bt2_bin_index 
+    path( "${refined_bins.baseName}_index*.bt2" ), emit: bowtie2_bin_index 
 
     script:
     def prefix = "${refined_bins.baseName}"
@@ -668,49 +679,174 @@ process BOWTIE2_INDEX_BINS{
     stub:
     """
     mkdir bowtie2_out
-    touch ${refined_bins.baseName}_index.1.bt2
-    touch ${refined_bins.baseName}_index.2.bt2
-    touch ${refined_bins.baseName}_index.3.bt2
-    touch ${refined_bins.baseName}_index.4.bt2
-    touch ${refined_bins.baseName}_index.rev.1.bt2
-    touch ${refined_bins.baseName}_index.rev.2.bt2
-    touch ${refined_bins.baseName}_index
+    mkdir bowtie2_out/bin_index
+    touch ${sample}_index.1.bt2
+    touch ${sample}_index.2.bt2
+    touch ${sample}_index.3.bt2
+    touch ${sample}_index.4.bt2
+    touch ${sample}_index.rev.1.bt2
+    touch ${sample}_index.rev.2.bt2
+    touch ${sample}_index
     """
 }
-process BOWTIE2_MAP_BINS {
+/* 
+Mapping reads to Bins with Bowtie2
+*/
+process BOWTIE2_MAP_BINS{
     tag "BOWTIE2_MAP_BINS ${index} ${reads_trimmed}" //"$assembler-$name"
     label 'UnO'
-    publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') //Assembly/${assembler}/${name}_QC", mode: params.publish_dir_mode,
-        //saveAs: {filename -> filename.indexOf(".bowtie2.log") > 0 ? filename : null}
+    publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') 
 
     input:
     path( index )
-    tuple val( sample ), path( reads_trimmed )
-       
+    tuple val( sample ), path( reads_trimmed )  
+    //val   save_unaligned
+    //val   sort_bam
     
     output:
-    path( "${sample.id}_sorted.bam" ), emit: aligned_bins_bam
-    path( "${sample.id}_sorted.bam.bai"), emit: aligned_bam_bin_index 
+    path( "${sample.id}_sorted.bam" ), emit: aligned_bam_to_bins
+    path( "${sample.id}_sorted.bam.bai"), emit: aligned_bam_to_bins_index
     //path( "${sample_id}.bowtie2.log" ), emit: align_log
 
     script:
-    def idx = index[0].getBaseName(2)
     def prefix = "${sample.id}"
+    def input = "-1 \"${reads_trimmed[0]}\" -2 \"${reads_trimmed[1]}\""
     //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
     """
-    bowtie2 -p 8 -x ${idx} -q -1 ${reads_trimmed[0]} -2 ${reads_trimmed[1]} --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
-    samtools index ${sample.id}_sorted.bam
+    INDEX=`find -L ./ -name "*.rev.1.bt2l" -o -name "*.rev.1.bt2" | sed 's/.rev.1.bt2l//' | sed 's/.rev.1.bt2//'`
+    bowtie2 -p 8 -x \$INDEX -q $input --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    samtools index ${prefix}_sorted.bam
     """
     //required the -h flag to make this work into view/sort commands
     //needed to dealre the correct output in declared output
     // will need this to accomodate multiple reads 
     stub:
     """
-    mkdir mapped
+    mkdir mapped_bins
     touch ${sample.id}_sorted.bam
     touch ${sample.id}_sorted.bam.bai
     """
 }
+
+/* 
+Including alternate read mapping approach for co-assembled + refined bins
+*/
+process CONCAT_REFINED_BINS{
+    tag "CONCAT_REFINED_BINS ${refined_bins}"
+    label 'UnO'
+    publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
+
+    input:
+    tuple val( sample ), path( refined_bins )
+
+    output:
+    tuple val( sample ), path("DAStool_bins_concatenated.fna"), emit: concatenated_bins_file
+
+    script:
+    """
+    cat ${refined_bins} > DAStool_bins_concatenated.fna
+    """
+    stub:
+    """
+    mkdir DASTool_out
+    touch DAStool_bins_concatenated.fna
+    """
+
+}
+/*
+Generate index file for concatenated bin file
+*/
+process BT2_INDEX_CONCAT_BIN_FILE{
+    tag "BT2_INDEX_CONCAT_BIN_FILE ${concat_bins_file}" // need to check inputs and outputs
+    label 'UnO'
+    publishDir ("${params.outdir}/bowtie2_out/concat_bin_index", mode: 'copy')
+    
+    input:
+    tuple val(sample), path( concat_bins_file )
+
+    output:
+    tuple val( sample), path( "${concat_bins_file.baseName}_index*.bt2" ), emit: bowtie2_concat_bin_index 
+
+    script:
+    def prefix = "${concat_bins_file.baseName}"
+    """
+    bowtie2-build ${concat_bins_file} ${prefix}_index
+    touch ${prefix}_index
+    """
+    stub:
+    """
+    mkdir bowtie2_out
+    mkdir concat_bin_index
+    touch ${concat_bins_file.baseName}_index.1.bt2
+    touch ${concat_bins_file.baseName}_index.2.bt2
+    touch ${concat_bins_file.baseName}_index.3.bt2
+    touch ${concat_bins_file.baseName}_index.4.bt2
+    touch ${concat_bins_file.baseName}_index.rev.1.bt2
+    touch ${concat_bins_file.baseName}_index.rev.2.bt2
+    touch ${concat_bins_file.baseName}_index
+    """
+}
+/*
+Mapping reads to bin with bowtie index 
+*/
+process MAP_READS_CONCAT_BINS{
+    tag "MAP_READS_CONCAT_BINS ${index} ${reads_trimmed}" //need to double check on inputs and outputs 
+    label 'UnO'
+    publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') 
+
+    input:
+    tuple path(index), val(sample), path(reads_trimmed)
+
+    output:
+    path( "${sample.id}_sorted.bam" ), emit: mapped_reads_bam
+    path( "${sample.id}_sorted.bam.bai"), emit: mapped_reads_bam_index
+    //path( "${sample_id}.bowtie2.log" ), emit: align_log
+
+    script:
+    def prefix = "${sample.id}"
+    def input = "-1 \"${reads_trimmed[0]}\" -2 \"${reads_trimmed[1]}\""
+    //need to look into getting these formatted accordingly...how does this work with multiple sets of reads...the sample.ids are for each reads sample.group is for the set of group reads 
+    """
+    INDEX=`find -L ./ -name "*.rev.1.bt2l" -o -name "*.rev.1.bt2" | sed 's/.rev.1.bt2l//' | sed 's/.rev.1.bt2//'`
+    bowtie2 -p 8 -x \$INDEX -q $input --no-unal |samtools view -@ 2 -b -S -h | samtools sort -o ${prefix}_sorted.bam 
+    samtools index ${prefix}_sorted.bam
+    """
+
+    stub:
+    """
+    mkdir mapped_bins
+    touch ${sample.id}_sorted.bam
+    touch ${sample.id}_sorted.bam.bai
+    """
+}
+/*
+Using MetaBat2 to generate covereage information from reads mapped to index
+*/
+process JGISUMMARIZE_BINS_DEPTH{
+    tag "JGISUMMARIZE_BINS_DEPTH ${mapped_reads_bam}" //need to check that these work together 
+    label 'UnO'
+    publishDir ("${params.outdir}/Read_Coverage", mode: 'copy')
+    ignoreEmpty = true
+    
+    input:
+    tuple val( assembly_sample ), path( mapped_reads_bam ), path( aligned_bai ) //need to check in inputs and outputs for this part the assembly sample is the group which results in a single depth file
+    
+    output:
+    tuple val( assembly_sample ), path( "*_bins_cov_table.txt" ) , emit: bam_contig_depth_mapped_reads 
+
+    script:
+    def prefix = "${assembly_sample.id}"
+    """
+    jgi_summarize_bam_contig_depths --outputDepth ${prefix}_bins_cov_table.txt ${mapped_reads_bam}
+    """
+
+    stub:
+    """
+    mkdir Read_Coverage
+    touch ${prefix}_bins_cov_table.txt
+    """
+}
+
 /*
 ========================================================================================
    Workflow Event Handler
