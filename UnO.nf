@@ -113,24 +113,27 @@ workflow {
     contig2bin_tsv_ch = DASTOOL_CONTIG2BIN( max_bin_ch.binned_fastas, metabat_bins_ch.binned_fastas)
     refined_dastool_bins_ch = DASTOOL_BINNING(contig2bin_tsv_ch.maxbin2_fastatocontig2bin, contig2bin_tsv_ch.metabat2_fastatocontig2bin, megahit_assembly_ch.megahit_contigs)
     refined_bin_channel_check = DASTOOL_BINNING.out.bins
-    refined_bin_channel_check.view()
     bin_evaluation_ch = CHECKM_REFINED(refined_dastool_bins_ch.bins)
     //checkpoint
-    flatten_refined_dastool_bins_ch = DASTOOL_BINNING.out.bins.flatten() //this flattens the channel so each bin file can be seperately processed by prodigal 
+    prodigal_bin_input_ch = DASTOOL_BINNING.out.bins
+        .map {sample, bins -> [bins]}
+    flatten_refined_dastool_bins_ch = prodigal_bin_input_ch.flatten() //this flattens the channel so each bin file can be seperately processed by prodigal 
     prodigal_gene_prediction_ch = PRODIGAL_ANON( flatten_refined_dastool_bins_ch )
     //gene_annotation = GENEANNOTATIONTOOL( )
     //taxonomic_classification = SOMETAXTOOLS( )
     //mag_abundace_estimation =MAGABUNDANCETOOL( )
-    //index_refined_bins_ch = BOWTIE2_INDEX_BINS( flatten_refined_dastool_bins_ch ) //taking in the flattened bins might process them seperately...if not may need to format channel 
-    //test_index_ch = BOWTIE2_INDEX_BINS.out.bowtie2_bin_index
-    //test_index_ch.view()
-    //reads_mapped_to_bins_ch = BOWTIE2_MAP_BINS( index_refined_bins_ch.bowtie2_bin_index, trimmed_reads_ch.trimmed_reads )
     concatenated_bins_ch = CONCAT_REFINED_BINS( refined_dastool_bins_ch.bins )
     concatenated_refined_bins_index_ch = BT2_INDEX_CONCAT_BIN_FILE( concatenated_bins_ch.concatenated_bins_file )
-    //reads_mapped_to_bins_ch = MAP_READS_CONCAT_BINS( concantenated_refined_bins_index_ch.bowtie2_concat_bin_index, trimmed_reads_ch.trimmed_reads )
+    concat_bin_index_ch = BT2_INDEX_CONCAT_BIN_FILE.out.bowtie2_concat_bin_index
+    //concat_bin_index_ch.view() //this contains group and paths to indeces 
+    read_to_bin_mapping_input_ch = concat_bin_index_ch
+        .map { sample, index -> [sample.group, index]}
+        .combine(bt2_reads_input, by:0)
+        .map {group, index, sample, reads -> [index, sample, reads]}
+    //read_to_bin_mapping_input_ch.view()
+    reads_mapped_to_bins_ch = MAP_READS_CONCAT_BINS( read_to_bin_mapping_input_ch )
     //read_coverage_bins_ch = JGISUMMARIZE_BINS_DEPTH( reads_mapped_to_bins_ch.mapped_reads_bam )
 }
-
 /*
 ========================================================================================
    Processes
@@ -539,7 +542,7 @@ process DASTOOL_BINNING { //can provide link to conda environemnt with yml file.
     tuple val( sample ), path("*_summary.tsv")              , optional: true, emit: summary
     tuple val( sample ), path("*_DASTool_contig2bin.tsv")   , optional: true, emit: contig2bin
     tuple val( sample ), path("*.eval")                     , optional: true, emit: eval
-    path("*_DASTool_bins/*.fa")        , optional: true, emit: bins
+    tuple val( sample ), path("*_DASTool_bins/*.fa")        , optional: true, emit: bins
     tuple val( sample ), path("*.pdf")                      , optional: true, emit: pdfs
     tuple val( sample ), path("*.candidates.faa")           , optional: true, emit: fasta_proteins
     tuple val( sample ), path("*.faa")                      , optional: true, emit: candidates_faa
@@ -587,7 +590,7 @@ process CHECKM_REFINED { /*adding checkM to the environment downgrades some pack
     publishDir ("${params.outdir}", mode: 'copy') //need to add a way to include naming information for labeling purposes
     
     input:
-    path( refined_bins )
+    tuple val( sample ), path( refined_bins )
     
     output:
     path("CheckM/bins/*")                                  ,  emit: checkm_bins
@@ -734,10 +737,10 @@ process CONCAT_REFINED_BINS{
     publishDir ("${params.outdir}/DASTool_out", mode: 'copy')
 
     input:
-    path( refined_bins )
+    tuple val( sample ), path( refined_bins )
 
     output:
-    path("DAStool_bins_concatenated.fna"), emit: concatenated_bins_file
+    tuple val( sample ), path("DAStool_bins_concatenated.fna"), emit: concatenated_bins_file
 
     script:
     """
@@ -759,10 +762,10 @@ process BT2_INDEX_CONCAT_BIN_FILE{
     publishDir ("${params.outdir}/bowtie2_out/concat_bin_index", mode: 'copy')
     
     input:
-    file( concat_bins_file )
+    tuple val(sample), path( concat_bins_file )
 
     output:
-    path( "${concat_bins_file.baseName}_index*.bt2" ), emit: bowtie2_concat_bin_index 
+    tuple val( sample), path( "${concat_bins_file.baseName}_index*.bt2" ), emit: bowtie2_concat_bin_index 
 
     script:
     def prefix = "${concat_bins_file.baseName}"
@@ -792,9 +795,8 @@ process MAP_READS_CONCAT_BINS{
     publishDir ("${params.outdir}/bowtie2_out/mapped_bins", mode: 'copy') 
 
     input:
-    path( index )
-    tuple val( sample ), path( reads_trimmed )  
-        
+    tuple path(index), val(sample), path(reads_trimmed)
+
     output:
     path( "${sample.id}_sorted.bam" ), emit: mapped_reads_bam
     path( "${sample.id}_sorted.bam.bai"), emit: mapped_reads_bam_index
