@@ -125,13 +125,14 @@ workflow {
     concatenated_bins_ch = CONCAT_REFINED_BINS( refined_dastool_bins_ch.bins )
     concatenated_refined_bins_index_ch = BT2_INDEX_CONCAT_BIN_FILE( concatenated_bins_ch.concatenated_bins_file )
     concat_bin_index_ch = BT2_INDEX_CONCAT_BIN_FILE.out.bowtie2_concat_bin_index
-    //concat_bin_index_ch.view() //this contains group and paths to indeces 
+    //concat_bin_index_ch.view() //shows sample and index
     read_to_bin_mapping_input_ch = concat_bin_index_ch
         .map { sample, index -> [sample.group, index]}
         .combine(bt2_reads_input, by:0)
         .map {group, index, sample, reads -> [index, sample, reads]}
-    //read_to_bin_mapping_input_ch.view()
+    //read_to_bin_mapping_input_ch.view() //shows index, sample, reads
     reads_mapped_to_bins_ch = MAP_READS_CONCAT_BINS( read_to_bin_mapping_input_ch )
+    //reads_mapped_to_bins_ch.view()
     //read_coverage_bins_ch = JGISUMMARIZE_BINS_DEPTH( reads_mapped_to_bins_ch.mapped_reads_bam )
 }
 /*
@@ -798,8 +799,8 @@ process MAP_READS_CONCAT_BINS{
     tuple path(index), val(sample), path(reads_trimmed)
 
     output:
-    path( "${sample.id}_sorted.bam" ), emit: mapped_reads_bam
-    path( "${sample.id}_sorted.bam.bai"), emit: mapped_reads_bam_index
+    tuple val( sample ), path( "${sample.id}_sorted.bam" ), emit: mapped_reads_bam
+    tuple val( sample ), path( "${sample.id}_sorted.bam.bai"), emit: mapped_reads_bam_index
     //path( "${sample_id}.bowtie2.log" ), emit: align_log
 
     script:
@@ -829,13 +830,13 @@ process JGISUMMARIZE_BINS_DEPTH{
     ignoreEmpty = true
     
     input:
-    tuple val( assembly_sample ), path( mapped_reads_bam ), path( aligned_bai ) //need to check in inputs and outputs for this part the assembly sample is the group which results in a single depth file
+    tuple val( sample ), path( mapped_reads_bam ) //all bam files need to be put into 1 depth file
     
     output:
-    tuple val( assembly_sample ), path( "*_bins_cov_table.txt" ) , emit: bam_contig_depth_mapped_reads 
+    tuple val( sample ), path( "*_bins_cov_table.txt" ) , emit: bam_contig_depth_mapped_reads //this sample value will need to be the name of the refined bins.fna file
 
     script:
-    def prefix = "${assembly_sample.id}"
+    def prefix = "DasTool_refined_bins"
     """
     jgi_summarize_bam_contig_depths --outputDepth ${prefix}_bins_cov_table.txt ${mapped_reads_bam}
     """
